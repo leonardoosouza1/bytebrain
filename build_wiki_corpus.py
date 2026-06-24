@@ -36,7 +36,12 @@ _HTML = re.compile(r"<[^>]+>")
 
 
 def clean(t):
-    t = html.unescape(t)
+    for _ in range(3):                       # unescape repeatedly: &amp;nbsp; -> &nbsp; -> \xa0
+        t2 = html.unescape(t)
+        if t2 == t:
+            break
+        t = t2
+    t = t.replace("\xa0", " ")               # non-breaking space -> normal space
     t = _TABLE.sub("", t)
     t = _REF2.sub("", t)
     t = _REF1.sub("", t)
@@ -53,6 +58,7 @@ def clean(t):
     t = _HEADING.sub(r"\1.", t)
     t = t.replace("'''", "").replace("''", "")
     t = _HTML.sub("", t)
+    t = re.sub(r"&[a-zA-Z]+;|&#\d+;", "", t)   # strip any residual HTML entities
     return t
 
 

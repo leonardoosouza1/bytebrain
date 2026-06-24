@@ -41,3 +41,11 @@ class WordTransition:
             for i in range(len(w) - 1)
         ]
         return float(np.mean(surprisals))
+
+    def transition_surprisal(self, prev_word: str, word: str) -> float:
+        """-log P(word | prev_word): the coherence cost of following prev_word with word.
+        Lower = more coherent. Used by the coherence-guided decoder to rank candidate words."""
+        if not prev_word or not word:
+            return 6.0
+        a, v = self.alpha, self.vocab
+        return -math.log((self.bigram.get((prev_word, word), 0) + a) / (self.unigram.get(prev_word, 0) + a * v))

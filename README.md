@@ -150,11 +150,17 @@ src/
   data.py         # Portuguese-prose corpus filter & builder
 overnight_loop.py # self-validating, self-correcting training loop
 examples/         # runnable sampling demo + saved outputs
+research/         # exploratory scripts behind the results (see research/README.md)
+  coherence/      #   the search for a measurable coherence signal
+  robustness/     #   byte-vs-token robustness experiment
+  data_pipeline/  #   corpus construction, cleaning, polite fetchers
+  model_variants/ #   architecture & scale experiments
+results/          # training metrics from runs (evidence)
 ```
 
-Research/experimental scripts (robustness, byte-vs-token, coherence batteries, fetchers) are kept
-at the repository root and will be consolidated under `research/` once the current training run
-completes.
+The exploratory scripts that produced the results above live under
+[`research/`](research/README.md), grouped by theme. The clean, importable package is
+[`src/`](src); the canonical trainer is `overnight_loop.py`.
 
 ---
 

@@ -1,0 +1,5 @@
+# ByteBrain runtime dependencies.
+# torch must be a ROCm build for AMD GPUs, e.g.:
+#   pip install torch --index-url https://download.pytorch.org/whl/rocm6.2
+torch>=2.2
+numpy>=1.24

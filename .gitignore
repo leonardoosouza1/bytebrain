@@ -17,3 +17,11 @@ __pycache__/
 .venv/
 venv/
 .venv-rocm/
+
+# working artifacts & drafts (not for the public repo)
+POST_LINKEDIN.md
+PLAN.md
+*.jsonl
+signal_curves.json
+research/**/*.json
+ckpt*/

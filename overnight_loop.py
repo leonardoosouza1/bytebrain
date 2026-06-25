@@ -9,7 +9,7 @@ import numpy as np
 import torch, torch.nn as nn, torch.nn.functional as F
 torch.manual_seed(0); np.random.seed(0)
 DEV = "cuda"
-BASE = "/home/leonardo/projects/LLM/bytebrain"
+BASE = os.path.dirname(os.path.abspath(__file__))
 CKDIR = f"{BASE}/overnight_ck"; os.makedirs(CKDIR, exist_ok=True)
 TOTAL_H = 10.0; CYCLE_MIN = 25; LB = 256; BATCH = 56
 D, NL, NH = 512, 8, 8     # ~25M: zona eficiente RDNA2; corpus 4.4MB+ suporta sem overfit; guards (dropout/wd/epoch-cap/auto-revert) ativos

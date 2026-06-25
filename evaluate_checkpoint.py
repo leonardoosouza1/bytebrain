@@ -2,6 +2,7 @@
 and appends a row to the evolution journal. The cron cycle pauses training, runs this, then resumes.
 """
 import json
+import os
 import re
 import sys
 from collections import Counter
@@ -10,13 +11,13 @@ from datetime import datetime
 import numpy as np
 import torch
 
-sys.path.insert(0, "/home/leonardo/projects/LLM/bytebrain")
+BASE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, BASE)
 from src.model import ByteGPT
 from src.coherence import WordTransition
 from src.sample import coherence_guided_generate
 
 DEV = "cuda"
-BASE = "/home/leonardo/projects/LLM/bytebrain"
 _W = re.compile(r"[a-zàáâãéêíóôõúüç]+")
 
 # read latest step + val_bpb from the training log

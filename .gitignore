@@ -19,7 +19,6 @@ venv/
 .venv-rocm/
 
 # working artifacts & drafts (not for the public repo)
-POST_LINKEDIN.md
 PLAN.md
 *.jsonl
 signal_curves.json

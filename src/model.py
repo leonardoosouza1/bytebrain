@@ -84,9 +84,12 @@ def _rename_legacy(key: str) -> str:
 
 
 def load_checkpoint(model: ByteGPT, path: str, map_location: str = "cpu") -> ByteGPT:
-    """Load a state dict, transparently remapping checkpoints saved by the training loop."""
-    sd = torch.load(path, map_location=map_location)
-    if "t.weight" in sd:  # legacy training-loop checkpoint
+    """Load weights from any checkpoint format this repo produces:
+    train.py's full checkpoint ({"model": ..., "opt": ...}), the legacy overnight_loop state dict
+    (short attribute names), or a plain state dict."""
+    obj = torch.load(path, map_location=map_location, weights_only=False)
+    sd = obj["model"] if isinstance(obj, dict) and "model" in obj else obj
+    if "t.weight" in sd:  # legacy overnight_loop checkpoint -> remap to clean names
         sd = {_rename_legacy(k): v for k, v in sd.items()}
     model.load_state_dict(sd)
     return model

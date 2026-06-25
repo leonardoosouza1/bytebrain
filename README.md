@@ -35,26 +35,26 @@ coherence harder. That trade-off is exactly what this project measures and pushe
 
 Every number below is **measured on the hardware listed, not extrapolated**.
 
-### Training (8M-param model, validated run)
-- Trained **from scratch** on a growing, cleaned Portuguese corpus on the RX 6750 XT.
-- 100 training cycles / ~6 h wall-clock, **zero overfitting** (see *Self-validating loop*).
-- Validation loss: **1.84 bits/byte**.
-- The model writes **grammatically coherent Portuguese** — correct agreement, dates, place names —
-  then degrades into repetition after ~2–3 sentences. That degradation is a capacity limit at 8M,
-  not a knowledge gap: the *prefix* of every sample is real Portuguese.
+### Training (40M-param model, validated run)
+- Trained **from scratch** on **1.33 GB** of clean Portuguese Wikipedia on the RX 6750 XT.
+- ~16 h wall-clock, validation **1.47 → 1.288 bits/byte**, **zero overfitting** (val stays *below*
+  train — the model never runs out of fresh data).
+- It writes **fluent, grammatically correct Portuguese** — agreement, dates, sentence structure —
+  but still rambles and invents facts over long spans. That gap is **global** coherence: a capacity
+  ceiling, not a local one (see the battery below).
 
-A **26M-param model is training at the time of writing** to extend the coherent span.
+An **86M-param model is training as of this writing** (gradient checkpointing + fp16) to push the
+ceiling further.
 
-### Generation quality (nucleus + repetition-penalty sampling)
-Replacing plain temperature sampling with **nucleus (top-p) sampling plus a recent-byte
-repetition penalty** drops the word-transition surprisal (`wtrans`, see below) from **9.0 → 7.9**
-and roughly doubles the coherent span. It directly kills the degenerate `"e e e"` collapse that
-small byte-level models fall into.
+### Generation quality — coherence-guided decoding
+**Coherence-guided decoding** (draft K candidate words, keep the one maximising model fluency minus
+its word-transition surprisal `wtrans`) roughly **doubles the coherent span, 16 → 32 words**, on the
+same weights with no retraining.
 
-Sample (8M model, `temperature=0.6, top_p=0.85`):
+Sample (40M model):
 
-> *"O ex-mandioca, os artigos de Almeida pela Nicarágua. Em 1956, foi inaugurado a 18 de setembro
-> de 2017. Em 1953, foi convencido para a Costa da Segunda-feira."*
+> *"O Brasil em uma tentativa de população... a Assembleia Nacional de Relações Extraordinárias, que
+> se formou na cidade de São Paulo, em 2013."*
 
 ### Structural findings (the internal structure of a byte)
 - **Bit 5 of each ASCII byte encodes case** (lower ↔ UPPER) — confirmed on-device with
@@ -126,17 +126,55 @@ export HSA_OVERRIDE_GFX_VERSION=10.3.0 ROCR_VISIBLE_DEVICES=0 MIOPEN_FIND_MODE=2
 
 ## Quickstart
 
+### 1 · Clone & install
+
 ```bash
-pip install -r requirements.txt   # torch (ROCm build) + numpy
-
-# Sample from a trained checkpoint
-python -m examples.sample --checkpoint overnight_ck/loop_best.pt --prompt "O "
-
-# Train (self-validating loop)
-python overnight_loop.py
+git clone https://github.com/<your-user>/bytebrain.git
+cd bytebrain
+pip install -r requirements.txt        # numpy + torch (use a ROCm build on AMD)
 ```
 
-See [`examples/sample_outputs.md`](examples/sample_outputs.md) for real generations.
+### 2 · Build the dataset
+
+The corpus is **not** shipped (it is ~1.3 GB). Regenerate it from the public Wikipedia dump — the
+pipeline downloads, stream-parses the bz2 XML, strips wiki markup, and keeps only clean Portuguese
+prose via the `is_portuguese_prose` filter:
+
+```bash
+mkdir -p data/dumps
+wget -c https://dumps.wikimedia.org/ptwiki/latest/ptwiki-latest-pages-articles.xml.bz2 \
+     -O data/dumps/ptwiki-latest-pages-articles.xml.bz2   # ~2.6 GB
+
+python build_wiki_corpus.py            # -> data/pt_big.txt  (~1.3 GB clean prose)
+```
+
+For another language, point the dump URL at that wiki and swap the prose filter — the byte model
+itself is language-agnostic.
+
+### 3 · Train (power-loss safe, resumable)
+
+```bash
+# AMD RDNA2 (RX 6700/6750 XT) env — force the gfx override:
+export HSA_OVERRIDE_GFX_VERSION=10.3.0 ROCR_VISIBLE_DEVICES=0 MIOPEN_FIND_MODE=2
+
+python train.py --corpus data/pt_big.txt --ckpt-dir ckpt \
+    --dim 640 --layers 8 --heads 8 --ctx 512 \
+    --batch 24 --accum 4 --amp --decay-steps 50000
+```
+
+`--amp` uses fp16 (RDNA2 runs fp16 at ~2× fp32). Re-run the **exact same command** to resume from
+the last atomic checkpoint after a crash or power cut. To train a larger model on 12 GB, add
+`--checkpoint` (gradient checkpointing) and bump `--dim/--layers` (e.g. `--dim 768 --layers 12`).
+
+### 4 · Generate
+
+```bash
+python -m examples.sample --checkpoint ckpt/ckpt_best.pt \
+    --dim 640 --layers 8 --heads 8 --prompt "O "
+```
+
+Pass the same `--dim/--layers/--heads` you trained with. See
+[`examples/sample_outputs.md`](examples/sample_outputs.md) for real generations.
 
 ---
 

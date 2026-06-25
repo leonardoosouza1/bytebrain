@@ -8,6 +8,7 @@ impossible by construction — every byte is in-vocabulary, in every language an
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.utils.checkpoint
 
 CONTEXT = 256  # bytes of context (size of the positional table)
 
@@ -40,9 +41,11 @@ class Block(nn.Module):
 class ByteGPT(nn.Module):
     """Byte-level GPT. The default config (dim=512, layers=8) is ~26M parameters."""
 
-    def __init__(self, dim: int = 512, n_layers: int = 8, n_heads: int = 8, context: int = CONTEXT):
+    def __init__(self, dim: int = 512, n_layers: int = 8, n_heads: int = 8, context: int = CONTEXT,
+                 use_checkpoint: bool = False):
         super().__init__()
         self.context = context
+        self.use_checkpoint = use_checkpoint
         self.tok = nn.Embedding(256, dim)
         self.pos = nn.Embedding(context, dim)
         self.blocks = nn.ModuleList([Block(dim, n_heads) for _ in range(n_layers)])
@@ -53,7 +56,10 @@ class ByteGPT(nn.Module):
         pos = torch.arange(x.size(1), device=x.device)
         h = self.tok(x) + self.pos(pos)[None]
         for b in self.blocks:
-            h = b(h)
+            if self.use_checkpoint and self.training:
+                h = torch.utils.checkpoint.checkpoint(b, h, use_reentrant=False)
+            else:
+                h = b(h)
         return self.head(self.lnf(h))
 
     @property

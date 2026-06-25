@@ -49,6 +49,13 @@ def main():
     ap.add_argument("--max-steps", type=int, default=2_000_000)
     ap.add_argument("--ckpt-secs", type=int, default=300)   # full checkpoint every 5 min
     ap.add_argument("--val-every", type=int, default=1000)
+    ap.add_argument("--warmup", type=int, default=1000)
+    ap.add_argument("--decay-steps", type=int, default=120000)
+    ap.add_argument("--accum", type=int, default=1, help="gradient accumulation: effective batch = batch * accum")
+    ap.add_argument("--unlikelihood", type=float, default=0.0, help="weight of repetition-unlikelihood loss (0 = off)")
+    ap.add_argument("--ul-window", type=int, default=16)
+    ap.add_argument("--checkpoint", action="store_true", help="gradient checkpointing (fit bigger models)")
+    ap.add_argument("--amp", action="store_true", help="fp16 mixed precision (RDNA2 fp16 = 2x fp32)")
     ap.add_argument("--device", default="cuda")
     a = ap.parse_args()
     os.makedirs(a.ckpt_dir, exist_ok=True)
@@ -60,8 +67,9 @@ def main():
     TR, VA = data[:cut], data[cut:]
     print(f"corpus {n/1e6:.1f}MB | train {len(TR)/1e6:.1f}MB | val {len(VA)/1e6:.2f}MB", flush=True)
 
-    model = ByteGPT(dim=a.dim, n_layers=a.layers, n_heads=a.heads, context=a.ctx).to(DEV)
+    model = ByteGPT(dim=a.dim, n_layers=a.layers, n_heads=a.heads, context=a.ctx, use_checkpoint=a.checkpoint).to(DEV)
     opt = torch.optim.AdamW(model.parameters(), a.lr, weight_decay=a.wd)
+    scaler = torch.amp.GradScaler("cuda", enabled=a.amp)
     step, best_val, elapsed_prev = 0, 1e9, 0.0
 
     ckpt_path = os.path.join(a.ckpt_dir, "ckpt.pt")
@@ -97,21 +105,50 @@ def main():
         model.train()
         return tot / 20 / math.log(2)
 
+    def lr_at(s):                                    # warmup then cosine decay to 10% of peak lr
+        if s < a.warmup:
+            return a.lr * (s + 1) / a.warmup
+        if s >= a.decay_steps:
+            return a.lr * 0.1
+        prog = (s - a.warmup) / max(1, a.decay_steps - a.warmup)
+        return a.lr * (0.1 + 0.9 * 0.5 * (1 + math.cos(math.pi * prog)))
+
     model.train()
     last_ckpt = time.time()
     try:
         while step < a.max_steps:
-            xb = get_batch(TR, a.batch, a.ctx, DEV)
-            loss = F.cross_entropy(model(xb[:, :-1]).reshape(-1, 256), xb[:, 1:].reshape(-1))
+            for g in opt.param_groups:
+                g["lr"] = lr_at(step)
             opt.zero_grad(set_to_none=True)
-            loss.backward()
+            mean_loss = 0.0
+            for _ in range(a.accum):                          # gradient accumulation -> larger effective batch
+                xb = get_batch(TR, a.batch, a.ctx, DEV)
+                with torch.autocast("cuda", dtype=torch.float16, enabled=a.amp):
+                    logits = model(xb[:, :-1])
+                    tgt = xb[:, 1:]
+                    loss = F.cross_entropy(logits.reshape(-1, 256), tgt.reshape(-1))
+                    if a.unlikelihood > 0:                    # push DOWN prob of repeating recent bytes
+                        cx = xb[:, :-1]
+                        Bn, L = tgt.shape
+                        neg = torch.zeros(Bn, L, 256, device=DEV, dtype=torch.bool)
+                        ar = torch.arange(L, device=DEV)
+                        for w in range(a.ul_window):
+                            neg.scatter_(2, cx[:, (ar - w).clamp(min=0)].unsqueeze(-1), True)
+                        neg.scatter_(2, tgt.unsqueeze(-1), False)
+                        ul = -(torch.log(1 - F.softmax(logits, -1) + 1e-6) * neg).sum(-1).mean()
+                        loss = loss + a.unlikelihood * ul
+                    loss = loss / a.accum
+                scaler.scale(loss).backward()
+                mean_loss += loss.item()
+            scaler.unscale_(opt)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            opt.step()
+            scaler.step(opt)
+            scaler.update()
             step += 1
             if step % 100 == 0:
-                tok = step * a.batch * a.ctx
+                tok = step * a.batch * a.ctx * a.accum
                 hrs = (elapsed_prev + time.time() - t_start) / 3600
-                print(f"step {step} | bpb {loss.item()/math.log(2):.3f} | {tok/1e6:.0f}M tok | {hrs:.1f}h", flush=True)
+                print(f"step {step} | bpb {mean_loss/math.log(2):.3f} | {tok/1e6:.0f}M tok | {hrs:.1f}h", flush=True)
             if step % a.val_every == 0:
                 v = validate()
                 if v < best_val:

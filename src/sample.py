@@ -77,15 +77,16 @@ def _draft_word(model, x, temperature, top_p, rep_penalty, rep_window, ctx, max_
 
 @torch.no_grad()
 def coherence_guided_generate(model, coherence, prompt="O ", n=400, temperature=0.8, top_p=0.9,
-                              rep_penalty=1.4, rep_window=48, K=6, alpha=1.0, device="cuda"):
+                              rep_penalty=1.4, rep_window=48, K=6, alpha=1.0, no_repeat_trigram=True,
+                              device="cuda"):
     """Coherence-guided decoding (the winner of the architecture battery).
 
     At every word boundary, draft K candidate next-words and keep the one that maximises
         model_fluency(mean logprob)  -  alpha * coherence.transition_surprisal(prev_word, candidate)
     i.e. a word that is both likely under the model AND a coherent continuation of the previous
-    word. Spends spare compute on verification instead of generating blindly; on the validated 26M
-    model this roughly DOUBLED the coherent span (~16 -> ~32 words) over plain sampling, with the
-    same weights. `coherence` is a WordTransition fit on a reference corpus. Larger K = more search.
+    word. With `no_repeat_trigram`, candidates that would repeat an already-generated word-trigram
+    are blocked — this kills the phrase-looping ("Governo Brasileiro ... Governo Brasileiro") that
+    a fluent model falls into. `coherence` is a WordTransition fit on a reference corpus.
     """
     model.eval()
     ctx = getattr(model, "context", 256)
@@ -94,13 +95,17 @@ def coherence_guided_generate(model, coherence, prompt="O ", n=400, temperature=
     while produced < n:
         words = _WORD.findall(bytes(x[0].tolist()).decode("utf-8", "ignore").lower())
         prev = words[-1] if words else ""
+        prev2 = words[-2] if len(words) >= 2 else ""
+        seen3 = set(zip(words, words[1:], words[2:])) if no_repeat_trigram and len(words) >= 3 else set()
         best = None
         for _ in range(K):
             wb, lp = _draft_word(model, x, temperature, top_p, rep_penalty, rep_window, ctx)
             wtxt = bytes([c for c in wb if c not in (32, 10)]).decode("utf-8", "ignore").lower()
             wm = _WORD.findall(wtxt)
-            surp = coherence.transition_surprisal(prev, wm[0]) if wm else 8.0
-            score = lp - alpha * surp
+            cand = wm[0] if wm else ""
+            surp = coherence.transition_surprisal(prev, cand) if cand else 8.0
+            repeat_pen = 6.0 if (cand and prev2 and (prev2, prev, cand) in seen3) else 0.0
+            score = lp - alpha * surp - repeat_pen
             if best is None or score > best[0]:
                 best = (score, wb)
         x = torch.cat([x, torch.tensor([best[1]], device=device)], 1)

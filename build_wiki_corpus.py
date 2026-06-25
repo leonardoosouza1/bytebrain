@@ -94,17 +94,24 @@ def main():
     with open(OUT, "w", encoding="utf-8") as out:
         for raw in pages(DUMP):
             npages += 1
-            for para in re.split(r"\n+", clean(raw)):
-                para = re.sub(r"[ \t]+", " ", para).strip()
-                if is_portuguese_prose(para):
-                    h = hashlib.md5(para[:120].encode()).hexdigest()
-                    if h not in seen:
-                        seen.add(h)
-                        out.write(para + "\n\n")
-                        kept += 1
-                        tot += len(para.encode())
-            if npages % 50000 == 0:
-                print(f"  {npages} paginas | limpo {tot/1e6:.0f}MB ({kept} paragrafos) | {(time.time()-t0)/60:.0f}min", flush=True)
+            if len(raw) > 300_000:                 # skip pathological mega-pages (lists/data dumps)
+                continue
+            try:
+                cleaned = clean(raw)
+                for para in re.split(r"\n+", cleaned):
+                    para = re.sub(r"[ \t]+", " ", para).strip()
+                    if is_portuguese_prose(para):
+                        h = hashlib.md5(para[:120].encode()).hexdigest()
+                        if h not in seen:
+                            seen.add(h)
+                            out.write(para + "\n\n")
+                            kept += 1
+                            tot += len(para.encode())
+            except Exception:
+                continue                            # one bad page never kills the whole run
+            if npages % 20000 == 0:
+                out.flush()
+                print(f"  {npages} paginas | limpo {tot/1e6:.0f}MB ({kept} paragrafos) | {(time.time()-t0)/60:.1f}min", flush=True)
     print(f"\nPRONTO: {npages} paginas -> LIMPO {tot/1e6:.0f}MB ({kept} paragrafos) em {(time.time()-t0)/60:.0f}min -> {OUT}", flush=True)
 
 

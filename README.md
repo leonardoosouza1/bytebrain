@@ -35,6 +35,11 @@ coherence harder. That trade-off is exactly what this project measures and pushe
 
 Every number below is **measured on the hardware listed, not extrapolated**.
 
+> 📊 **Full results, every number, and all ~10 documented dead ends:**
+> [`FINDINGS.md`](FINDINGS.md) (results + failures + changelog) ·
+> [`research/architecture_battery/README.md`](research/architecture_battery/README.md) (experiment methodology) ·
+> [`overnight_journal.md`](overnight_journal.md) (live training log).
+
 ### Training (40M-param model, validated run)
 - Trained **from scratch** on **1.33 GB** of clean Portuguese Wikipedia on the RX 6750 XT.
 - ~16 h wall-clock, validation **1.47 → 1.288 bits/byte**, **zero overfitting** (val stays *below*

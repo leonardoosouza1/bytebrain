@@ -29,3 +29,5 @@ Corpus construction and cleaning for Portuguese.
 Architecture and scale experiments: `bytebrain_big.py`, `bytebrain_deep.py`, `bytebrain_scale.py`,
 `bytebrain_multiscript.py` (one model over 8 scripts), `bytebrain_unified_lm.py`,
 `bytebrain_overnight.py`, `bytebrain_best_gen.py`, `bytebrain_coscientist.py`.
+
+> **Note:** these are the actual exploration scripts, kept for transparency and reproducibility — not polished CLIs. Several contain machine-specific absolute paths. The runnable, clean entry points are at the repo root (`train.py`, `build_wiki_corpus.py`, `examples/`).

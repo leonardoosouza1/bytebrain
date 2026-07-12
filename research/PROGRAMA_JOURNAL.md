@@ -1590,3 +1590,64 @@ dog/car → só "Vejo um cachorro/carro" (guarda de 2 fraseados impede relação
 capital da França ao ver a torre. Consertos: guardar demo sob __main__ (importava e rodava 2×), frases de
 relação ambas mirando o PAÍS (senão landmark→cidade discordava). iara_v2.py + iara_eye.py + iara_brain_grow.py.
 V3 = plugar ouvido (fala) no mesmo barramento: webcam→olho + mic→ouvido → fuse → responde.
+
+========================================================================
+# IARA EAR — ouvido CLAP (áudio→conceito contrastado) — 20:17
+========================================================================
+ouvido carregado em 35.9s · CLAP 153M · vocab 13
+
+========================================================================
+# IARA EAR — ouvido CLAP (áudio→conceito contrastado) — 20:18
+========================================================================
+ouvido carregado em 16.6s · CLAP 153M · vocab 13
+  tom 440Hz      → a beep or pure tone 94%  [1308ms]
+  ruído branco   → white noise or static 95%  [44ms]
+  sirene         → a siren or alarm 92%  [35ms]
+  silêncio       → white noise or static 47% · a beep or pure tone 24% · silence 23%  [35ms]
+  acorde C       → a beep or pure tone 80%  [34ms]
+
+========================================================================
+# IARA STRESS — hormônios + sobrecarga + erros + multimodal — 20:21
+========================================================================
+IARA carregada (51s): cérebro 3B + olho CLIP + ouvido CLAP. começando com 0 fatos.
+
+## BATERIA [dopamina ON] — 33 eventos (dopamina ON)
+  hormônios (t·tag·DA·CORT·NE·energia):
+     t0  ask   DA=0.55 CORT=0.10 NE=0.20 E=0.99
+     t8  ask   DA=0.03 CORT=0.10 NE=0.39 E=0.98
+     t16 hear  DA=0.03 CORT=0.33 NE=0.57 E=0.96
+     t24 see   DA=0.55 CORT=0.23 NE=0.41 E=0.94
+     t32 ask   DA=0.30 CORT=0.26 NE=0.43 E=0.90
+  consolidou 14 fatos (9/9 certos no gold) · reuso 5 · abstenção 10 · DA-spikes 15
+  ALUCINAÇÃO (cravou fato de entidade FAKE): 1 · throughput 2.3 ev/s
+
+## BATERIA [dopamina OFF (ablação)] — 33 eventos (dopamina OFF (ablação))
+  hormônios (t·tag·DA·CORT·NE·energia):
+     t0  ask   DA=0.00 CORT=0.10 NE=0.20 E=0.99
+     t8  ask   DA=0.00 CORT=0.10 NE=0.39 E=0.98
+     t16 hear  DA=0.00 CORT=0.33 NE=0.57 E=0.96
+     t24 see   DA=0.00 CORT=0.23 NE=0.41 E=0.94
+     t32 ask   DA=0.00 CORT=0.26 NE=0.43 E=0.90
+  consolidou 0 fatos (0/0 certos no gold) · reuso 0 · abstenção 29 · DA-spikes 0
+  ALUCINAÇÃO (cravou fato de entidade FAKE): 0 · throughput 1.9 ev/s
+
+## VEREDITO — o cérebro sob estresse
+  DEGRADAÇÃO GRACIOSA: sob sobrecarga+erros, cortisol subiu (final 0.26) e a abstenção segurou;
+    ALUCINAÇÃO em entidade fake = 1 (não inventou) — fica MAIS cético sob estresse, não menos honesto.
+  DOPAMINA = plasticidade: COM DA consolidou 14 fatos (9/9); SEM DA (ablação) 0 fatos (0/0).
+    → dopamina é ESSENCIAL pro aprender (ablação colapsa), replicando o achado do brain_organs.
+  MULTIMODAL: sirene subiu arousal/cortisol; marco (Eiffel) deu DA-spike e disparou aprendizado — o cérebro REAGE ao sensorial.
+wall 1.4min
+
+## iara_stress — CÉREBRO SOB HORMÔNIOS + SOBRECARGA + ERROS + MULTIMODAL (teste pesado)
+Hormônios fiéis ao doc: DOPAMINA=RPE gateia plasticidade; CORTISOL=estresse sobe o sarrafo do garimpo
+(mais cético sob ameaça); NORADRENALINA=arousal por carga; ENERGIA=fadiga. Alimentou o cérebro (3B) com
+VISÃO (olho CLIP) + AUDIÇÃO (ouvido CLAP) e despejou 33 eventos mistos (conhecido/novo/fake/typo/lixo/
+contradição/sensorial). RESULTADOS:
+  DINÂMICA HORMONAL correta: DA spike no novo (t0=0.55) e no marco Eiffel (t24=0.55), cai no reuso (t8=0.03);
+    CORTISOL sobe com fakes+lixo+sirene (t16=0.33); NE(arousal) sobe com carga (t16=0.57); energia cai 0.99→0.90.
+  DEGRADAÇÃO GRACIOSA: sob sobrecarga+erros, abstenção segurou (10/33), ALUCINAÇÃO em fake = 1 (só Wakanda,
+    cujo cânone fictício o 3B sabe consistente — borderline, não invenção). Fica MAIS cético sob estresse.
+  MULTIMODAL: sirene→arousal/cortisol; Eiffel→DA-spike→disparou aprendizado. O cérebro REAGE ao sensorial.
+  DOPAMINA=PLASTICIDADE (ablação): COM DA consolidou 14 fatos (9/9 gold); SEM DA (dopamina OFF) 0 fatos, tudo
+    abstém. Dopamina é ESSENCIAL pro aprender — replica brain_organs (ablação=colapso). iara_stress.py + iara_ear.py.

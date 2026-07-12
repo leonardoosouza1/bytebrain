@@ -1,0 +1,47 @@
+{
+ "fato direto": [
+  4,
+  4,
+  1.786
+ ],
+ "TYPO (\u00f3rg\u00e3o-byte)": [
+  4,
+  4,
+  78.519
+ ],
+ "agregado": [
+  2,
+  2,
+  0.013
+ ],
+ "multi-hop/cross": [
+  2,
+  2,
+  0.273
+ ],
+ "absten\u00e7\u00e3o (falso)": [
+  2,
+  2,
+  1.823
+ ],
+ "score": 1.0,
+ "edges": 292,
+ "kb": 7.6,
+ "germ_M": 3.5,
+ "born": [
+  "capital@south america",
+  "capital@north america",
+  "capital@western europe",
+  "capital@northern europe",
+  "capital@eastern europe",
+  "capital@southern europe",
+  "capital@east asia",
+  "capital@southeast asia",
+  "capital@middle east",
+  "capital@south asia",
+  "capital@east africa"
+ ],
+ "scale_N": 61,
+ "clean": "58/61",
+ "typo": "55/61"
+}

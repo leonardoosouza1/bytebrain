@@ -19,7 +19,7 @@ import torch.nn.functional as F
 
 import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from src.model import ByteGPT  # noqa: E402
+from src.model import ByteGPT, set_act_quant_bits  # noqa: E402
 
 
 def atomic_save(obj, path):
@@ -57,9 +57,15 @@ def main():
     ap.add_argument("--checkpoint", action="store_true", help="gradient checkpointing (fit bigger models)")
     ap.add_argument("--amp", action="store_true", help="fp16 mixed precision (RDNA2 fp16 = 2x fp32)")
     ap.add_argument("--device", default="cuda")
+    ap.add_argument("--quant-bits", type=int, default=0,
+                    help="N-bit quant-aware activations (byte-neuron experiment); 0 = float")
+    ap.add_argument("--seed", type=int, default=-1, help="fix RNG for reproducible A/B runs")
     a = ap.parse_args()
     os.makedirs(a.ckpt_dir, exist_ok=True)
     DEV = a.device
+    if a.seed >= 0:                                  # fair A/B: identical init + data order
+        torch.manual_seed(a.seed)
+        np.random.seed(a.seed)
 
     data = np.memmap(a.corpus, dtype=np.uint8, mode="r")    # scales to many GB, no RAM blow-up
     n = len(data)
@@ -68,6 +74,9 @@ def main():
     print(f"corpus {n/1e6:.1f}MB | train {len(TR)/1e6:.1f}MB | val {len(VA)/1e6:.2f}MB", flush=True)
 
     model = ByteGPT(dim=a.dim, n_layers=a.layers, n_heads=a.heads, context=a.ctx, use_checkpoint=a.checkpoint).to(DEV)
+    set_act_quant_bits(a.quant_bits)
+    if a.quant_bits > 0:
+        print(f"⚡ quant-aware activations: {a.quant_bits}-bit per-channel (byte-neuron)", flush=True)
     opt = torch.optim.AdamW(model.parameters(), a.lr, weight_decay=a.wd)
     scaler = torch.amp.GradScaler("cuda", enabled=a.amp)
     step, best_val, elapsed_prev = 0, 1e9, 0.0
@@ -92,7 +101,7 @@ def main():
             "model": model.state_dict(), "opt": opt.state_dict(), "step": step,
             "best_val": best_val, "elapsed": elapsed_prev + (time.time() - t_start),
             "torch_rng": torch.get_rng_state(), "np_rng": np.random.get_state(),
-            "config": {"dim": a.dim, "layers": a.layers, "heads": a.heads, "ctx": a.ctx},
+            "config": {"dim": a.dim, "layers": a.layers, "heads": a.heads, "ctx": a.ctx, "quant_bits": a.quant_bits},
         }, os.path.join(a.ckpt_dir, tag + ".pt"))
 
     @torch.no_grad()

@@ -12,6 +12,31 @@ import torch.utils.checkpoint
 
 CONTEXT = 256  # bytes of context (size of the positional table)
 
+# ── Quantization-aware activation quant (byte-neuron experiment) ──────────────
+# When > 0, every transformer block's output (the residual stream = the neurons'
+# states) is fake-quantized to N bits, per-channel, with a straight-through
+# estimator. 0 = off (plain float). Adds NO parameters → checkpoints stay
+# loadable by the float model and the iara-engine exporter.
+_ACT_QUANT_BITS = 0
+
+
+def set_act_quant_bits(bits: int) -> None:
+    global _ACT_QUANT_BITS
+    _ACT_QUANT_BITS = int(bits)
+
+
+def _fake_quant_act(x: torch.Tensor) -> torch.Tensor:
+    bits = _ACT_QUANT_BITS
+    if bits <= 0 or bits >= 16:
+        return x
+    qmax = (1 << bits) - 1
+    dims = tuple(range(x.dim() - 1))                 # per-channel: scale over (B,T), keep D
+    lo = x.amin(dims, keepdim=True).detach()
+    hi = x.amax(dims, keepdim=True).detach()
+    rng = (hi - lo).clamp_min(1e-9)
+    xq = torch.round(((x - lo) / rng) * qmax) / qmax * rng + lo
+    return x + (xq - x).detach()                     # straight-through estimator
+
 
 class Block(nn.Module):
     """Pre-norm transformer block: causal multi-head self-attention + GELU MLP."""
@@ -35,7 +60,8 @@ class Block(nn.Module):
         attn_drop = 0.1 if self.training else 0.0
         a = F.scaled_dot_product_attention(q, k, v, is_causal=True, dropout_p=attn_drop)
         x = x + self.drop(self.proj(a.transpose(1, 2).reshape(B, L, D)))
-        return x + self.drop(self.mlp(self.ln2(x)))
+        out = x + self.drop(self.mlp(self.ln2(x)))
+        return _fake_quant_act(out)                  # no-op unless act-quant enabled
 
 
 class ByteGPT(nn.Module):
@@ -52,9 +78,16 @@ class ByteGPT(nn.Module):
         self.lnf = nn.LayerNorm(dim)
         self.head = nn.Linear(dim, 256)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        pos = torch.arange(x.size(1), device=x.device)
-        h = self.tok(x) + self.pos(pos)[None]
+    def forward(self, x: torch.Tensor = None, inputs_embeds: torch.Tensor = None) -> torch.Tensor:
+        # inputs_embeds ([B, L, dim]) permite plantar soft-prompt/semente no espaço de bytes (wisdom bridge).
+        # Backward-compatible: chamadas antigas forward(x) com byte-ids seguem idênticas.
+        if inputs_embeds is not None:
+            h = inputs_embeds
+            pos = torch.arange(h.size(1), device=h.device)
+            h = h + self.pos(pos)[None]
+        else:
+            pos = torch.arange(x.size(1), device=x.device)
+            h = self.tok(x) + self.pos(pos)[None]
         for b in self.blocks:
             if self.use_checkpoint and self.training:
                 h = torch.utils.checkpoint.checkpoint(b, h, use_reentrant=False)

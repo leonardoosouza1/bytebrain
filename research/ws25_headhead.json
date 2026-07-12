@@ -1,0 +1,8 @@
+{
+ "N": 59,
+ "tok_clean": "55/59",
+ "tok_typo": "37/59",
+ "tok_drop_pp": 30.5,
+ "byte_drop_pp": 5,
+ "winner": "byte"
+}

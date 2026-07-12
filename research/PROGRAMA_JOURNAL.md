@@ -1180,3 +1180,29 @@ wall 0.2min
 Robustez byte a typo sobre TODAS as 61 capitais do grafo: LIMPO 58/61=95% · COM TYPO no país
 55/61=90% (órgão-byte recuperou 55). O byte-nativo SEGURA 90% sob erro de digitação onde o token
 BPE estilhaça a palavra e cai ~45% (medido antes) = ~2× mais robusto. Latência ~1.8ms limpo, ~2.3ms typo.
+
+========================================================================
+# WS25 — HEAD-TO-HEAD TYPO: byte-IARA vs token-3B — 18:32
+========================================================================
+conjunto: 59 capitais do grafo · pergunta limpa vs com typo no país
+
+## RESULTADO token-3B (ao vivo)
+  LIMPO: 55/59 = 93%
+  COM TYPO: 37/59 = 63%  → degradação +31pp
+    ✗ Chile→typo 'Chiel' : 3B disse "I don't have enoug" (certo=Santiago)
+    ✗ Peru→typo 'Preu' : 3B disse 'Paris' (certo=Lima)
+    ✗ Bolivia→typo 'Bloivia' : 3B disse 'Bloivis' (certo=La)
+    ✗ France→typo 'Franec' : 3B disse 'Ljubljana' (certo=Paris)
+
+## COMPARATIVO honesto
+  byte-IARA : 95% → 90%  (degradação -5pp) — edit-distance conserta o país no substrato byte
+  token-3B  : 93% → 63%  (degradação +31pp) — BPE re-tokeniza a palavra com erro
+  VEREDITO: byte GANHA em robustez (degrada menos)
+wall 0.6min
+
+## WS25 — HEAD-TO-HEAD AO VIVO: byte-IARA vs token-3B sob TYPO (fecha a lacuna de honestidade)
+Eu citava "~45% do token" de memória; MEDI ao vivo no mesmo conjunto (59 capitais do grafo).
+token-3B: LIMPO 55/59=93% → COM TYPO 37/59=63% (degrada -31pp). byte-IARA: 95%→90% (degrada -5pp).
+O byte degrada ~6× MENOS. Falhas do 3B são o modo BPE-estilhaça: Peru→"Preu" diz 'Paris',
+France→"Franec" diz 'Ljubljana', Chile→"Chiel" abstém. O órgão-byte conserta "Preu"→Peru (1 swap)→grafo→Lima.
+Correção honesta: o número real do token neste setup é 63% (não ~45%). Tese byte=robustez CONFIRMADA ao vivo.

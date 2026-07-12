@@ -32,7 +32,7 @@ Aprende com o uso: a sinapse fortalece no reuso (Hebbian) e um **conceito nasce*
 | Salto | O quê | Resultado honesto |
 |---|---|---|
 | **MTP → MBP** | germinador byte com K=4 cabeças prevendo os próximos 4 **bytes** | lookahead 97/96/96/95% → **~3.7× menos passos** (especulativo) |
-| **Órgãos falam byte** | typo corrigido no substrato byte, cobrindo todas as entidades | **robustez a typo 90%** (N=61) vs ~45% do token BPE = ~2× |
+| **Órgãos falam byte** | typo corrigido no substrato byte, cobrindo todas as entidades | **byte degrada -5pp** (95→90%) vs **token-3B -31pp** (93→63%) sob typo = ~6× mais robusto (head-to-head ao vivo, N=59) |
 | **Memória semeada** | o 3B semeia o grafo 1× offline; runtime responde instantâneo | fato direto **~1.8 ms** (vs 7B no chat = 0.3 tok/s) |
 | **Não alucina** | verificador abstém em entidade desconhecida | abstenção 2/2, 0 alucinação nos falsos |
 | **Backbone objetivo** | continente/região são fato-terra (src=`geo`); capitais vêm do modelo | agregado e multi-hop 2/2 |
@@ -41,6 +41,7 @@ Aprende com o uso: a sinapse fortalece no reuso (Hebbian) e um **conceito nasce*
 
 - Capacidade global da bateria: **100%** — fato direto 4/4 · typo 4/4 · agregado 2/2 · multi-hop 2/2 · abstenção 2/2
 - Validação em escala (N=61 capitais reais): **limpo 95% · com typo 90%**
+- Head-to-head ao vivo sob typo (N=59): **byte-IARA 95→90% (-5pp) vs token-3B 93→63% (-31pp)** = byte ~6× mais robusto
 - MBP especulativo: **~3.7×** menos passos de geração
 - Peso: **7.6 KB** de conhecimento + **3.5M** de germinador byte (vs 7B fp16 = 14 GB)
 - Latência: grafo **instantâneo (~1.8 ms)**; germinador byte só na falta

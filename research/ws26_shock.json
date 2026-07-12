@@ -1,0 +1,9 @@
+{
+ "assoc_edges": 272,
+ "lang_emerge": "5/11",
+ "region_emerge": "3/11",
+ "corr_same": 0.188,
+ "corr_diff": -0.094,
+ "cap_read": "0/11",
+ "cap_gen": "11/11"
+}

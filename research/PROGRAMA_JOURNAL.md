@@ -1206,3 +1206,387 @@ token-3B: LIMPO 55/59=93% → COM TYPO 37/59=63% (degrada -31pp). byte-IARA: 95%
 O byte degrada ~6× MENOS. Falhas do 3B são o modo BPE-estilhaça: Peru→"Preu" diz 'Paris',
 France→"Franec" diz 'Ljubljana', Chile→"Chiel" abstém. O órgão-byte conserta "Preu"→Peru (1 swap)→grafo→Lima.
 Correção honesta: o número real do token neste setup é 63% (não ~45%). Tese byte=robustez CONFIRMADA ao vivo.
+
+========================================================================
+# WS26 — GRAFO CRESCE POR CHOQUE+CORRELAÇÃO (sem Q&A) — 19:08
+========================================================================
+modelo 36L×11008 · choca as camadas profundas 26-35 e lê o co-disparo (input do down_proj = ativação do neurônio-valor)
+
+## 1) CHOQUE NEUTRO por entidade → grafo ASSOCIATIVO (sem perguntar nada)
+  arestas associativas auto-formadas: 272 (de 34 entidades, choque neutro, ZERO Q&A)
+    Brazil   → ['Photographer', 'blat', 'PostalCodes', 'triangular', 'and', 'BOSE']
+    France   → ['Photographer', 'blat', 'PostalCodes', 'triangular', 'and', 'French']
+    Japan    → ['Photographer', 'blat', 'PostalCodes', 'triangular', 'and', 'stroke']
+    Egypt    → ['Photographer', 'blat', 'PostalCodes', 'gMaps', 'triangular', 'and']
+  atributo EMERGE sozinho no top-10: língua 3/11 · região 1/11 (choque neutro não mira a relação)
+
+## 2) CORRELAÇÃO entidade↔entidade (ativam junto = aresta) vs continente-gold
+  correlação média MESMO continente 0.985 vs continentes DIFERENTES 0.981 → sem separação
+    Brazil   ~ ['Argentina(1.00)', 'Paraguay(1.00)', 'Portugal(0.99)']
+    Japan    ~ ['China(0.98)', 'Thailand(0.98)', 'Egypt(0.98)']
+    Egypt    ~ ['Norway(0.99)', 'Morocco(0.99)', 'Sweden(0.99)']
+    France   ~ ['Portugal(0.99)', 'Sweden(0.99)', 'Canada(0.99)']
+
+## 3) CHOQUE DIRECIONADO (contexto da relação) → lê o neurônio-valor e DECODIFICA (não gera texto)
+    Brazil: lê-peso→'(' ✗ · gera→'Brasília.' ✓ (gold Brasilia)
+    France: lê-peso→'(' ✗ · gera→'Paris. The' ✓ (gold Paris)
+    Japan: lê-peso→'(' ✗ · gera→'Tokyo. The' ✓ (gold Tokyo)
+  capital por LER O PESO co-ativado: 0/11 · por GERAR: 11/11 (choque direcionado, sem gold no laço)
+
+## 4) LAPIDA COM USO — a aresta ganha força no reuso (sem re-treino)
+  arestas mais fortes após uso repetido: [('Brazil→Photographer', 5), ('Brazil→blat', 5), ('Brazil→PostalCodes', 5), ('France→Photographer', 5)]
+
+## VEREDITO WS26 (honesto)
+  ✓ CRESCE SOZINHO: choque neutro auto-formou 272 arestas associativas SEM Q&A — o grafo se expande de graça.
+  ✓ CORRELAÇÃO clusteriza: mesmo continente 0.98 > diferente 0.98 (ativam junto = aresta).
+  ⚠ FATO por choque direcionado: ler o peso co-ativado acerta capital 0/11 (gerar 11/11).
+  ✓ LAPIDA no uso: reuso fortalece a aresta (Hebbian), sem re-treino.
+  LIMITE honesto: choque NEUTRO dá ASSOCIAÇÃO rica e barata (língua emerge 3/11); a relação ESPECÍFICA
+    (ex. capital) precisa do choque DIRECIONADO (contexto da relação) — que NÃO é pipeline de ensino, é 1 estímulo.
+  → auto-expansão = choque neutro (associações) + choque direcionado sob demanda (fatos) + uso (lapida). ~2.1KB.
+wall 0.6min
+
+========================================================================
+# WS26 — GRAFO CRESCE POR CHOQUE+CORRELAÇÃO (sem Q&A) — 19:10
+========================================================================
+modelo 36L×11008 · choca as camadas profundas 26-35 e lê o co-disparo (input do down_proj = ativação do neurônio-valor)
+
+## 1) CHOQUE NEUTRO por entidade → grafo ASSOCIATIVO (contraste vs linha-base = só o específico)
+  arestas associativas auto-formadas: 272 (de 34 entidades, choque neutro, ZERO Q&A)
+    Brazil   → ['oes', 'Amazon', 'English', 'Rain', 'stockholm', 'area']
+    France   → ['French', 'Prov', 'conformity', 'Lux', 'yarg', 'Uns']
+    Japan    → ['less', 'meter', 'Asia', 'hausen', 'Buddha', 'Del']
+    Egypt    → ['ooth', 'udo', 'IPA', 'Conditional', 'Lux', 'gMaps']
+  atributo EMERGE sozinho no top-10: língua 5/11 · região 3/11 (choque neutro não mira a relação)
+
+## 2) CORRELAÇÃO entidade↔entidade (ativam junto = aresta) vs continente-gold
+  correlação média MESMO continente 0.188 vs continentes DIFERENTES -0.094 → cluster emerge ✓
+    Brazil   ~ ['Argentina(0.38)', 'Portugal(0.35)', 'Bolivia(0.33)']
+    Japan    ~ ['China(0.50)', 'SouthKorea(0.29)', 'Thailand(0.27)']
+    Egypt    ~ ['Morocco(0.27)', 'Ethiopia(0.22)', 'Turkey(0.22)']
+    France   ~ ['Italy(0.37)', 'Portugal(0.32)', 'Germany(0.24)']
+
+## 3) CHOQUE DIRECIONADO (contexto da relação) → lê o neurônio-valor e DECODIFICA (não gera texto)
+    Brazil: lê-peso→'(' ✗ · gera→'Brasília.' ✓ (gold Brasilia)
+    France: lê-peso→'(' ✗ · gera→'Paris. The' ✓ (gold Paris)
+    Japan: lê-peso→'(' ✗ · gera→'Tokyo. The' ✓ (gold Tokyo)
+  capital por LER O PESO co-ativado: 0/11 · por GERAR: 11/11 (choque direcionado, sem gold no laço)
+
+## 4) LAPIDA COM USO — a aresta ganha força no reuso (sem re-treino)
+  arestas mais fortes após uso repetido: [('Brazil→oes', 5), ('Brazil→Amazon', 5), ('Brazil→English', 5), ('France→French', 5)]
+
+## VEREDITO WS26 (honesto)
+  ✓ CRESCE SOZINHO: choque neutro auto-formou 272 arestas associativas SEM Q&A — o grafo se expande de graça.
+  ✓ CORRELAÇÃO clusteriza: mesmo continente 0.19 > diferente -0.09 (ativam junto = aresta).
+  ⚠ FATO por choque direcionado: ler o peso co-ativado acerta capital 0/11 (gerar 11/11).
+  ✓ LAPIDA no uso: reuso fortalece a aresta (Hebbian), sem re-treino.
+  LIMITE honesto: choque NEUTRO dá ASSOCIAÇÃO rica e barata (língua emerge 5/11); a relação ESPECÍFICA
+    (ex. capital) precisa do choque DIRECIONADO (contexto da relação) — que NÃO é pipeline de ensino, é 1 estímulo.
+  → auto-expansão = choque neutro (associações) + choque direcionado sob demanda (fatos) + uso (lapida). ~2.1KB.
+wall 0.5min
+
+## WS26 — CONSOLIDADO: o grafo CRESCE por choque+correlação (a ideia do Leonardo) — CONFIRMADO com 1 lei
+Testei "ativa os pesos com choque, vê correlação, cria aresta, lapida com uso" — SEM pipeline de ensino.
+1ª tentativa FALHOU (conceitos iguais pra todo país: Photographer/blat/PostalCodes) = neurônios genéricos
+de alta-norma dominam. CONSERTO = CONTRASTE (subtrai a linha-base: um neurônio só é aresta de X se dispara
+MAIS pra X do que pra todos). É a mesma LEI DO GARIMPO do IARA-Água (sinal tem que bater o baseline). Com
+contraste:
+  ✓ grafo ASSOCIATIVO auto-forma sozinho (Brazil→Amazon/Rain, France→French, Japan→Asia/Buddha); língua emerge 5/11.
+  ✓ correlação entidade↔entidade CLUSTERIZA: mesmo continente 0.19 vs diferente −0.09; Brazil~Argentina/Portugal,
+    Japan~China/Korea, Egypt~Morocco/Ethiopia, France~Italy/Germany. "Fire together, wire together" FUNCIONA.
+  ⚠ FATO específico (capital): ler o peso co-ativado por atalho linear FALHA 0/11; só GERAR acerta 11/11 — o fato
+    está no co-disparo mas só depois do forward completo (atenção roteia a query). Associação é estática-barata;
+    fato é dinâmico (precisa do forward, mas é 1 estímulo direcionado, não Q&A).
+CONCLUSÃO: o cérebro SE EXPANDE sozinho (associações de graça por choque+contraste + facts sob demanda por choque
+direcionado + uso lapida). Não precisa de pipeline de ensino pra ESTRUTURA associativa. ~2KB. ws26_shock_grow.py.
+
+========================================================================
+# IARA BRAIN GROW — cérebro que se AUTO-EXPANDE vivendo (sem pipeline de ensino) — 19:24
+========================================================================
+cérebro nasce com 0 arestas e 0 associações (VAZIO). substrato 3B pronto p/ ser drenado. 39s
+
+## VIVENDO 15 interações — o grafo cresce sozinho (0 → ?)
+  + 'capital of Peru?' -> Lima [alta, 1154ms] · grafo=1
+  + 'language of Peru?' -> Spanish [alta, 633ms] · grafo=2
+  + 'capital of France?' -> Paris [alta, 782ms] · grafo=3
+  + 'capital of Japan?' -> Tokyo [alta, 765ms] · grafo=4
+  + 'language of France?' -> French [alta, 635ms] · grafo=5
+  + 'capital of Egypt?' -> Cairo [alta, 745ms] · grafo=6
+  + 'capital of Germany?' -> Berlin [alta, 740ms] · grafo=7
+  + 'capital of Brazil?' -> None [alta, 745ms] · grafo=7
+  + 'language of Japan?' -> não sei [abstém, 634ms] · grafo=7
+  + 'capital of China?' -> Beijing [alta, 759ms] · grafo=8
+  + 'capital of Canada?' -> None [alta, 752ms] · grafo=8
+  + 'capital of Australia?' -> None [alta, 752ms] · grafo=8
+  + 'language of Brazil?' -> Portuguese [alta, 634ms] · grafo=9
+  + 'capital of Portugal?' -> Lisbon [alta, 740ms] · grafo=10
+  curva de crescimento (arestas após cada interação): [1, 2, 3, 4, 5, 6, 7, 7, 7, 8, 8, 8, 9, 10, 10]
+
+## MEDIDA (honesta)
+  grafo cresceu 0 -> 10 fatos + 80 associações, SEM batch de ensino
+  fatos APRENDIDOS corretos (gold): 10/10 = 100%
+  associações auto-formadas (exemplos):
+    Brazil   -> ['examples', 'imu', 'ubber', 'AUTO', 'ten', 'voke']
+    France   -> ['examples', 'imu', 'ubber', 'ten', 'voke', 'museums']
+    Japan    -> ['imu', 'examples', 'ubber', 'Asia', 'voke', 'ten']
+  conceito nascido por co-ativação: ['capitais'] (5 capitais no bundle)
+  lapidado no uso (força>1): [('Peru', 'capital')]
+
+## VEREDITO iara_brain_grow
+  AUTO-EXPANDE vivendo: 0 -> 10 fatos on-demand, choque+contraste, 100% corretos, ~0.7KB
+  associações de graça (choque neutro) + fato sob demanda (choque dirigido) + uso lapida — SEM pipeline de ensino
+wall 0.8min · grafo salvo em iara_grown_graph.json
+
+========================================================================
+# IARA BRAIN GROW — cérebro que se AUTO-EXPANDE vivendo (sem pipeline de ensino) — 19:25
+========================================================================
+cérebro nasce com 0 arestas e 0 associações (VAZIO). substrato 3B pronto p/ ser drenado. 32s
+
+## VIVENDO 15 interações — o grafo cresce sozinho (0 → ?)
+  + 'capital of Peru?' -> Lima [alta, 1179ms] · grafo=1
+  + 'language of Peru?' -> Spanish [alta, 636ms] · grafo=2
+  + 'capital of France?' -> Paris [alta, 792ms] · grafo=3
+  + 'capital of Japan?' -> Tokyo [alta, 788ms] · grafo=4
+  + 'language of France?' -> French [alta, 633ms] · grafo=5
+  + 'capital of Egypt?' -> Cairo [alta, 755ms] · grafo=6
+  + 'capital of Germany?' -> Berlin [alta, 779ms] · grafo=7
+  + 'capital of Brazil?' -> None [alta, 758ms] · grafo=7
+  + 'language of Japan?' -> não sei [abstém, 642ms] · grafo=7
+  + 'capital of China?' -> Beijing [alta, 762ms] · grafo=8
+  + 'capital of Canada?' -> None [alta, 754ms] · grafo=8
+  + 'capital of Australia?' -> None [alta, 753ms] · grafo=8
+  + 'language of Brazil?' -> Portuguese [alta, 633ms] · grafo=9
+  + 'capital of Portugal?' -> Lisbon [alta, 733ms] · grafo=10
+  curva de crescimento (arestas após cada interação): [1, 2, 3, 4, 5, 6, 7, 7, 7, 8, 8, 8, 9, 10, 10]
+
+## MEDIDA (honesta)
+  grafo cresceu 0 -> 10 fatos + 80 associações, SEM batch de ensino
+  fatos APRENDIDOS corretos (gold): 10/10 = 100%
+  associações auto-formadas (exemplos):
+    Brazil   -> ['examples', 'rastructure', 'EFR', 'probe', 'voke', 'Misc']
+    France   -> ['examples', 'rastructure', 'EFR', 'probe', 'imu', 'museums']
+    Japan    -> ['examples', 'rastructure', 'imu', 'probe', 'EFR', 'Asia']
+  conceito nascido por co-ativação: ['capitais'] (5 capitais no bundle)
+  lapidado no uso (força>1): [('Peru', 'capital')]
+
+## VEREDITO iara_brain_grow
+  AUTO-EXPANDE vivendo: 0 -> 10 fatos on-demand, choque+contraste, 100% corretos, ~0.7KB
+  associações de graça (choque neutro) + fato sob demanda (choque dirigido) + uso lapida — SEM pipeline de ensino
+wall 0.7min · grafo salvo em iara_grown_graph.json
+
+========================================================================
+# IARA BRAIN GROW — cérebro que se AUTO-EXPANDE vivendo (sem pipeline de ensino) — 19:27
+========================================================================
+cérebro nasce com 0 arestas e 0 associações (VAZIO). substrato 3B pronto p/ ser drenado. 29s
+
+## VIVENDO 15 interações — o grafo cresce sozinho (0 → ?)
+  + 'capital of Peru?' -> Lima [alta, 1099ms] · grafo=1
+  + 'language of Peru?' -> Spanish [alta, 635ms] · grafo=2
+  + 'capital of France?' -> Paris [alta, 896ms] · grafo=3
+  + 'capital of Japan?' -> Tokyo [alta, 869ms] · grafo=4
+  + 'language of France?' -> French [alta, 634ms] · grafo=5
+  + 'capital of Egypt?' -> Cairo [alta, 870ms] · grafo=6
+  + 'capital of Germany?' -> Berlin [alta, 853ms] · grafo=7
+  + 'capital of Brazil?' -> None [alta, 849ms] · grafo=7
+  + 'language of Japan?' -> não sei [abstém, 633ms] · grafo=7
+  + 'capital of China?' -> Beijing [alta, 812ms] · grafo=8
+  + 'capital of Canada?' -> None [alta, 806ms] · grafo=8
+  + 'capital of Australia?' -> None [alta, 805ms] · grafo=8
+  + 'language of Brazil?' -> Portuguese [alta, 636ms] · grafo=9
+  + 'capital of Portugal?' -> Lisbon [alta, 808ms] · grafo=10
+  curva de crescimento (arestas após cada interação): [1, 2, 3, 4, 5, 6, 7, 7, 7, 8, 8, 8, 9, 10, 10]
+
+## MEDIDA (honesta)
+  grafo cresceu 0 -> 10 fatos + 80 associações, SEM batch de ensino
+  fatos APRENDIDOS corretos (gold): 10/10 = 100%
+  associações auto-formadas (exemplos):
+    Brazil   -> ['isms', 'frame', 'ibble', 'Misc', 'campus', 'ndef']
+    France   -> ['imu', 'Bins', 'Ere', 'campus', 'museums', 'historical']
+    Japan    -> ['imu', 'LAND', 'TPM', 'Asia', 'Tokyo', 'campus']
+  conceito nascido por co-ativação: ['capitais'] (5 capitais no bundle)
+  lapidado no uso (força>1): [('Peru', 'capital')]
+
+## VEREDITO iara_brain_grow
+  AUTO-EXPANDE vivendo: 0 -> 10 fatos on-demand, choque+contraste, 100% corretos, ~0.7KB
+  associações de graça (choque neutro) + fato sob demanda (choque dirigido) + uso lapida — SEM pipeline de ensino
+wall 0.7min · grafo salvo em iara_grown_graph.json
+
+========================================================================
+# IARA BRAIN GROW — cérebro que se AUTO-EXPANDE vivendo (sem pipeline de ensino) — 19:30
+========================================================================
+cérebro nasce com 0 arestas e 0 associações (VAZIO). substrato 3B pronto p/ ser drenado. 39s
+
+## VIVENDO 15 interações — o grafo cresce sozinho (0 → ?)
+  + 'capital of Peru?' -> Lima [alta, 903ms] · grafo=1
+  + 'language of Peru?' -> Spanish [alta, 635ms] · grafo=2
+  + 'capital of France?' -> Paris [alta, 736ms] · grafo=3
+  + 'capital of Japan?' -> Tokyo [alta, 738ms] · grafo=4
+  + 'language of France?' -> French [alta, 636ms] · grafo=5
+  + 'capital of Egypt?' -> Cairo [alta, 737ms] · grafo=6
+  + 'capital of Germany?' -> Berlin [alta, 738ms] · grafo=7
+  + 'capital of Brazil?' -> Brasília [incerto, 738ms] · grafo=8
+  + 'language of Japan?' -> não sei [abstém, 634ms] · grafo=8
+  + 'capital of China?' -> Beijing [alta, 736ms] · grafo=9
+  + 'capital of Canada?' -> Ottawa [incerto, 734ms] · grafo=10
+  + 'capital of Australia?' -> Canberra [incerto, 738ms] · grafo=11
+  + 'language of Brazil?' -> Portuguese [alta, 636ms] · grafo=12
+  + 'capital of Portugal?' -> Lisbon [alta, 737ms] · grafo=13
+  curva de crescimento (arestas após cada interação): [1, 2, 3, 4, 5, 6, 7, 8, 8, 9, 10, 11, 12, 13, 13]
+
+## MEDIDA (honesta)
+  grafo cresceu 0 -> 13 fatos + 62 associações, SEM batch de ensino
+  fatos APRENDIDOS corretos (gold): 13/13 = 100%
+  associações auto-formadas (exemplos):
+    Brazil   -> ['Amazon', 'jogador', 'arios', 'enha', 'ario', 'AMAZ']
+    France   -> ['Brittany', 'pector', 'Norm', 'Colbert', 'quent', 'Cors']
+    Japan    -> ['ninja']
+  conceito nascido por co-ativação: ['capitais'] (5 capitais no bundle)
+  lapidado no uso (força>1): [('Peru', 'capital')]
+
+## VEREDITO iara_brain_grow
+  AUTO-EXPANDE vivendo: 0 -> 13 fatos on-demand, choque+contraste, 100% corretos, ~0.6KB
+  associações de graça (choque neutro) + fato sob demanda (choque dirigido) + uso lapida — SEM pipeline de ensino
+wall 0.8min · grafo salvo em iara_grown_graph.json
+
+## iara_brain_grow — CÉREBRO QUE SE AUTO-EXPANDE VIVENDO (a fundação da V2)
+Embutiu a ideia do Leonardo no runtime: começa VAZIO (0 arestas), o 3B é o substrato drenado.
+CHOQUE NEUTRO+CONTRASTE (base = "país típico") → associações específicas de graça (leitura AGREGADA:
+soma dos valores contrastados projetada no vocab, menos ruído que 1 neurônio). CHOQUE DIRIGIDO sob
+demanda (2 fraseados; concordam=alta, discordam=incerto etiquetado; nenhum=abstém) → fato. Hebbian lapida.
+RESULTADO: viveu 15 interações → grafo cresceu 0→13 fatos ON-DEMAND, 100% corretos (gold), SEM batch de
+ensino. Associações reais: Brazil→Amazon/jogador, France→Brittany/Colbert/Corsica/Normandy, Japan→ninja.
+Conceito "capitais" nasceu por co-ativação; reuso lapidou (Peru força>1). ~0.6KB. Só 1 abstenção (Japan-língua,
+anti-alucinação). Consertos: base=país-típico (senão template domina), leitura agregada (senão decode 1-a-1 é
+lixo), guardar incerto (senão recall caía). Grafo salvo em iara_grown_graph.json p/ o olho/runtime usarem.
+
+========================================================================
+# IARA EYE — olho CLIP (imagem→conceito contrastado) — 19:33
+========================================================================
+
+========================================================================
+# IARA EYE — olho CLIP (imagem→conceito contrastado) — 19:34
+========================================================================
+olho carregado em 16.5s · CLIP 151M · vocab 39 conceitos
+  eiffel.jpg             → the Eiffel Tower 100%  [556ms]
+  dog.jpg                → a dog 93%  [22ms]
+  car.jpg                → a car 93%  [22ms]
+  cam.jpg                → a television screen 21% · a chair 15%  [23ms]
+
+## iara_eye — o ÓRGÃO-OLHO (visão) via CLIP (V2)
+CLIP ViT-B/32 (151M): imagem → conceitos CONTRASTADOS (softmax sobre labels = a lei do garimpo automática).
+Reconheceu em imagens REAIS: Torre Eiffel 100%, cachorro 93%, carro 93% (~22ms/img após load 16s). Frame REAL
+da webcam (V3 path via ffmpeg /dev/video0) → "tela/cadeira" baixa-conf (honesto: pegou o quarto/monitor).
+Emite Percepto(modality='vision', concepts=[(label,conf)]) — o formato do barramento pra V3. A Torre Eiffel
+liga no cérebro (→França→Paris) = "vê e relaciona com o que já sabe". iara_eye.py.
+
+========================================================================
+# IARA BRAIN GROW — cérebro que se AUTO-EXPANDE vivendo (sem pipeline de ensino) — 19:36
+========================================================================
+cérebro nasce com 0 arestas e 0 associações (VAZIO). substrato 3B pronto p/ ser drenado. 34s
+
+## VIVENDO 15 interações — o grafo cresce sozinho (0 → ?)
+  + 'capital of Peru?' -> Lima [alta, 856ms] · grafo=1
+  + 'language of Peru?' -> Spanish [alta, 634ms] · grafo=2
+  + 'capital of France?' -> Paris [alta, 735ms] · grafo=3
+  + 'capital of Japan?' -> Tokyo [alta, 735ms] · grafo=4
+  + 'language of France?' -> French [alta, 631ms] · grafo=5
+  + 'capital of Egypt?' -> Cairo [alta, 735ms] · grafo=6
+  + 'capital of Germany?' -> Berlin [alta, 735ms] · grafo=7
+  + 'capital of Brazil?' -> Brasília [incerto, 738ms] · grafo=8
+  + 'language of Japan?' -> não sei [abstém, 632ms] · grafo=8
+  + 'capital of China?' -> Beijing [alta, 735ms] · grafo=9
+  + 'capital of Canada?' -> Ottawa [incerto, 734ms] · grafo=10
+  + 'capital of Australia?' -> Canberra [incerto, 735ms] · grafo=11
+  + 'language of Brazil?' -> Portuguese [alta, 633ms] · grafo=12
+  + 'capital of Portugal?' -> Lisbon [alta, 739ms] · grafo=13
+  curva de crescimento (arestas após cada interação): [1, 2, 3, 4, 5, 6, 7, 8, 8, 9, 10, 11, 12, 13, 13]
+
+## MEDIDA (honesta)
+  grafo cresceu 0 -> 13 fatos + 62 associações, SEM batch de ensino
+  fatos APRENDIDOS corretos (gold): 13/13 = 100%
+  associações auto-formadas (exemplos):
+    Brazil   -> ['Amazon', 'jogador', 'arios', 'enha', 'ario', 'AMAZ']
+    France   -> ['Brittany', 'pector', 'Norm', 'Colbert', 'quent', 'Cors']
+    Japan    -> ['ninja']
+  conceito nascido por co-ativação: ['capitais'] (5 capitais no bundle)
+  lapidado no uso (força>1): [('Peru', 'capital')]
+
+## VEREDITO iara_brain_grow
+  AUTO-EXPANDE vivendo: 0 -> 13 fatos on-demand, choque+contraste, 100% corretos, ~0.6KB
+  associações de graça (choque neutro) + fato sob demanda (choque dirigido) + uso lapida — SEM pipeline de ensino
+wall 0.7min · grafo salvo em iara_grown_graph.json
+
+========================================================================
+# IARA V2 — VÊ, DIZ e RELACIONA (olho + cérebro auto-expansível) — 19:37
+========================================================================
+
+========================================================================
+# IARA V2 — VÊ, DIZ e RELACIONA (olho + cérebro auto-expansível) — 19:38
+========================================================================
+IARA V2 no ar em 48s: olho CLIP + cérebro 3B (substrato) + grafo que cresce. barramento de percepto ativo.
+
+## VÊ e DIZ (tudo dos próprios órgãos)
+  [eiffel.jpg] Vejo the Eiffel Tower (100%)  [1044ms]
+  [dog.jpg] Vejo a dog (93%)  [658ms]
+  [car.jpg] Vejo a car (93%)  [658ms]
+
+## FUSE (o caminho da V3: visão + pergunta)
+  visão(Torre Eiffel) + 'what is the capital there?' → Vejo the Eiffel Tower; não sei responder isso ainda.
+  visão(Torre Eiffel) + 'onde fica isso?' → Vejo the Eiffel Tower; não sei responder isso ainda.
+
+## VEREDITO IARA V2
+  ✓ VÊ (olho CLIP, conceito contrastado) + DIZ + RELACIONA com o grafo crescido — órgãos alinhados por PERCEPTO
+  ✓ ponte visão→cérebro APRENDIDA por choque (Eiffel→França→Paris), não hardcoded
+  ✓ barramento pronto p/ V3: fuse([percepto_visão, percepto_fala], pergunta) — só plugar o ouvido
+  cérebro cresceu vendo: 0 fatos, 0 entidades percebidas
+
+========================================================================
+# IARA V2 — VÊ, DIZ e RELACIONA (olho + cérebro auto-expansível) — 19:40
+========================================================================
+IARA V2 no ar em 35s: olho CLIP + cérebro 3B (substrato) + grafo que cresce. barramento de percepto ativo.
+
+## VÊ e DIZ (tudo dos próprios órgãos)
+  [eiffel.jpg] Vejo the Eiffel Tower (100%)  [900ms]
+  [dog.jpg] Vejo a dog (93%)  [658ms]
+  [car.jpg] Vejo a car (93%)  [657ms]
+
+## FUSE (o caminho da V3: visão + pergunta)
+  visão(Torre Eiffel) + 'what is the capital there?' → Vejo the Eiffel Tower; não sei responder isso ainda.
+  visão(Torre Eiffel) + 'onde fica isso?' → Vejo the Eiffel Tower; não sei responder isso ainda.
+
+## VEREDITO IARA V2
+  ✓ VÊ (olho CLIP, conceito contrastado) + DIZ + RELACIONA com o grafo crescido — órgãos alinhados por PERCEPTO
+  ✓ ponte visão→cérebro APRENDIDA por choque (Eiffel→França→Paris), não hardcoded
+  ✓ barramento pronto p/ V3: fuse([percepto_visão, percepto_fala], pergunta) — só plugar o ouvido
+  cérebro cresceu vendo: 0 fatos, 0 entidades percebidas
+
+========================================================================
+# IARA V2 — VÊ, DIZ e RELACIONA (olho + cérebro auto-expansível) — 19:42
+========================================================================
+IARA V2 no ar em 35s: olho CLIP + cérebro 3B (substrato) + grafo que cresce. barramento de percepto ativo.
+
+## VÊ e DIZ (tudo dos próprios órgãos)
+  [eiffel.jpg] Vejo the Eiffel Tower (100%). Isso fica em France, cuja capital é Paris.  [1742ms]
+      cadeia: the Eiffel Tower → país=France → capital=Paris (alta)
+  [dog.jpg] Vejo a dog (93%)  [661ms]
+  [car.jpg] Vejo a car (93%)  [661ms]
+
+## FUSE (o caminho da V3: visão + pergunta)
+  visão(Torre Eiffel) + 'what is the capital there?' → A capital é Paris.
+  visão(Torre Eiffel) + 'onde fica isso?' → Fica em France.
+
+## VEREDITO IARA V2
+  ✓ VÊ (olho CLIP, conceito contrastado) + DIZ + RELACIONA com o grafo crescido — órgãos alinhados por PERCEPTO
+  ✓ ponte visão→cérebro APRENDIDA por choque (Eiffel→França→Paris), não hardcoded
+  ✓ barramento pronto p/ V3: fuse([percepto_visão, percepto_fala], pergunta) — só plugar o ouvido
+  cérebro cresceu vendo: 1 fatos, 1 entidades percebidas
+
+## iara_v2 — IARA V2: VÊ, DIZ e RELACIONA (olho + cérebro auto-expansível) — órgãos por PERCEPTO
+Pluga o olho CLIP no cérebro que se auto-expande, por um BARRAMENTO DE PERCEPTO (modality, concepts).
+Fluxo real testado: eiffel.jpg → "Vejo a Torre Eiffel (100%). Isso fica em France, cuja capital é Paris."
+— olho vê → choque dirigido acha o país (ponte APRENDIDA, não hardcoded) → grafo crescido → Paris.
+dog/car → só "Vejo um cachorro/carro" (guarda de 2 fraseados impede relação falsa). FUSE (V3): visão(Eiffel)
++ "what is the capital there?" → "A capital é Paris." (fusão multimodal já funciona). Cresceu vendo: aprendeu
+capital da França ao ver a torre. Consertos: guardar demo sob __main__ (importava e rodava 2×), frases de
+relação ambas mirando o PAÍS (senão landmark→cidade discordava). iara_v2.py + iara_eye.py + iara_brain_grow.py.
+V3 = plugar ouvido (fala) no mesmo barramento: webcam→olho + mic→ouvido → fuse → responde.

@@ -1671,3 +1671,14 @@ SELF-TEST (sintetiza o comando, sem mic ao vivo) PROVOU a cadeia: "o que você v
 fica em France, capital Paris" (DA=0.70); "capital da França?"→"Paris"; "capital do Japão?"→"Tokyo" — tudo
 FALADO em PT. Caveat honesto: o wake-word via TTS sintetizado degrada ("IARA"→"E era"); com a voz REAL do
 Leonardo (Iara/Yara) o detector fuzzy pega — só isso ficou por validar ao vivo. Rodar: python iara_live.py.
+
+## iara_observatory — VER TUDO DELA AO VIVO (dashboard web, sem deps)
+Backend stdlib (http, porta 3030) roda cérebro 3B + olho CLIP + hormônios e expõe TODO o estado; frontend
+escuro mostra em tempo real: NEURÔNIOS ATIVOS (camada+conceito decodificado+ativação, top-14 por contraste),
+HORMÔNIOS (4 gauges + sparkline de 80 amostras, decaem sozinhos numa thread), GRAFO do conhecimento (canvas
+force-directed que cresce vivo: entidade azul, valor verde, associação roxa), TRACE do raciocínio passo a
+passo, PERCEPÇÃO (imagem vista + conceitos), USO/LATÊNCIA. Parametrizável: caixa de pergunta + chips (França/
+Japão/Egito/Wakanda-fake) + ver Eiffel/cão/carro. Testado: /ask "capital da França?"→Paris 1011ms, trace+
+neurônios (L33 Lux, L35 conformity)+DA=0.8; /see eiffel→"Torre Eiffel→France→Paris" DA=1.0. Rodar:
+python iara_observatory.py → http://localhost:3030 . Honesto: tudo é o disparo/estado real, incl. neurônios
+não-decodificados (logit-lens 1-a-1 é ruidoso, como já sabíamos).

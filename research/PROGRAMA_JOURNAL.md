@@ -1651,3 +1651,23 @@ contradição/sensorial). RESULTADOS:
   MULTIMODAL: sirene→arousal/cortisol; Eiffel→DA-spike→disparou aprendizado. O cérebro REAGE ao sensorial.
   DOPAMINA=PLASTICIDADE (ablação): COM DA consolidou 14 fatos (9/9 gold); SEM DA (dopamina OFF) 0 fatos, tudo
     abstém. Dopamina é ESSENCIAL pro aprender — replica brain_organs (ablação=colapso). iara_stress.py + iara_ear.py.
+
+========================================================================
+# IARA VOICE — voz (TTS PT) + ouvido de fala (Whisper) — 20:31
+========================================================================
+voz+ouvido carregados em 42s · TTS mms-tts-por (sr 16000) · STT whisper-small
+  [FALOU 5.2s] 'Olá Leonardo, eu sou a IARA. Estou aqui, ouvindo e vendo.'  (tocou em paplay — você deve ter ouvido)
+  [OUVIU de volta] 'Olá, Leonardo. Eu sou a Yara. Estou aqui ouvindo e vendo.'
+  circuito fechado OK ✓
+
+## iara_voice + iara_live — CONVERSA VIVA (V3): webcam + mic + wake-word + voz
+iara_voice.py: VOZ neural PT (facebook/mms-tts-por, VITS) toca no alto-falante (paplay) + OUVIDO DE FALA
+(Whisper-small, pt) do mic (ffmpeg pulse). Self-test circuito fechado: ela falou "Olá Leonardo, eu sou a
+IARA..." e transcreveu de volta "Eu sou a Yara" (Whisper ouve IARA como Yara — foneticamente certo). ✓
+iara_live.py: loop vivo com o fluxo do Leonardo — mic sempre ouvindo → wake-word "IARA" (fuzzy, tolera
+Yara/Jara) → "Sim, estou aqui" → CAPTURA frame (olho CLIP) + grava comando (STT) → funde VISÃO+FALA →
+cérebro+hormônios → RESPONDE falando. A cada frame: só motion-diff barato (arousal); VER só no gatilho.
+SELF-TEST (sintetiza o comando, sem mic ao vivo) PROVOU a cadeia: "o que você vê?"→"Vejo a Torre Eiffel,
+fica em France, capital Paris" (DA=0.70); "capital da França?"→"Paris"; "capital do Japão?"→"Tokyo" — tudo
+FALADO em PT. Caveat honesto: o wake-word via TTS sintetizado degrada ("IARA"→"E era"); com a voz REAL do
+Leonardo (Iara/Yara) o detector fuzzy pega — só isso ficou por validar ao vivo. Rodar: python iara_live.py.

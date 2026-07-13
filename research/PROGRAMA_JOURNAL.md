@@ -1911,3 +1911,105 @@ PROFESSOR HAIKU (agente real, model haiku): IARA não sabe 6 fatos (química/lit
 história) → Haiku pesquisa (Astaná/Au/Machado/300000/Júpiter/1969) → ensina → IARA aprende (dopamina +1.0,
 felicidade 0.30→1.0, K 0→14.4) → repete pergunta → VALIDA 6/6 → 2ª vez habitua (0.30). O ciclo vivo FECHA:
 não sabe → pesquisa/ensina → aprende → valida → habitua. Inteligência REATIVA, não LLM estático.
+
+====================================================================
+# IARA DAEMON — o organismo persistente que VIVE (dia simulado)
+====================================================================
+IARA acorda. K=0 · hormônios em repouso. (percepção simulada; laço = daemon 24/7)
+
+## O DIA (percebe · sente · busca · pergunta · pesquisa)
+  você: 'qual a capital do Peru?'  →  IARA: Não sei — pediria pra pesquisar mais fundo   [DA0.0 cort0.15 tédio0.0]
+  você: 'qual a capital do Peru?'  →  IARA: Não sei — pediria pra pesquisar mais fundo   [DA0.0 cort0.20 tédio0.0]
+  você: 'qual a capital?'  →  IARA: 🗨 De qual exatamente? (preciso da entidade)   [DA0.0 cort0.20 tédio0.0]
+  você: 'qual a capital do Japao?'  →  IARA: Não sei — pediria pra pesquisar mais fundo   [DA0.0 cort0.25 tédio0.0]
+  [vê: a dog]   [tédio0.1]
+  [vê: a strange new gadget]   [tédio0.1]
+  você: 'capital do butao?'  →  IARA: The (pesquisei e aprendi ·DA+)   [DA0.9 cort0.22 tédio0.3]
+  você: 'quem descobriu o oxigenio xyz?'  →  IARA: Não sei — pediria pra pesquisar mais fundo   [DA0.9 cort0.27 tédio0.0]
+  você: 'qual a capital da França?'  →  IARA: Não sei — pediria pra pesquisar mais fundo   [DA0.9 cort0.32 tédio0.0]
+
+## FIM DO DIA → SONO (consolida o importante, poda o frágil)
+  dormiu: fortaleceu 1 memórias (as que geraram dopamina) · podou 0 frágeis · K 2.3→2.7
+
+## MANHÃ SEGUINTE — o que sobrou?
+  'qual a capital do Peru?' → esqueceu/precisaria repesquisar
+  'qual a capital do Japao?' → esqueceu/precisaria repesquisar
+  'capital do butao?' → The
+
+## VEREDITO — a IARA VIVE (comportamentos validados)
+  ✓ PESQUISA quando não sabe (3B): 1× · ✓ PROFESSOR EXTERNO: 0×
+  ✓ PERGUNTA DE VOLTA no ambíguo: 1× · ✓ ABSTÉM honesto: 5×
+  ✓ CURIOSA sozinha (por tédio): 0× · ✓ REUSO instantâneo: 0×
+  ✓ SONO consolidou/podou · ✓ ESQUECE o não-usado. É um SER que vive, não um LLM que responde. wall 0.8min
+
+====================================================================
+# IARA DAEMON — o organismo persistente que VIVE (dia simulado)
+====================================================================
+IARA acorda. K=0 · hormônios em repouso. (percepção simulada; laço = daemon 24/7)
+
+## O DIA (percebe · sente · busca · pergunta · pesquisa)
+  você: 'qual a capital do Peru?'  →  IARA: Lima (pesquisei e aprendi ·DA+)   [DA1.0 cort0.10 tédio0.0]
+  você: 'qual a capital do Peru?'  →  IARA: Lima (já sabia)   [DA1.0 cort0.10 tédio0.0]
+  você: 'qual a capital?'  →  IARA: 🗨 De qual exatamente? (preciso da entidade)   [DA1.0 cort0.10 tédio0.0]
+  você: 'qual a capital do Japao?'  →  IARA: Tokyo (pesquisei e aprendi ·DA+)   [DA1.0 cort0.10 tédio0.0]
+  [vê: a dog]   [tédio0.1]
+  [vê: a strange new gadget]   [tédio0.1]
+  ⚡ (entediada) IARA pergunta SOZINHA e busca  →  Spanish (pesquisei e aprendi ·DA+)   [tédio0.0]
+  você: 'autor de grande sertao veredas?'  →  IARA: Grande (pesquisei e aprendi ·DA+)   [DA1.0 cort0.10 tédio0.0]
+  você: 'quem descobriu o oxigenio xyz?'  →  IARA: Não sei — pediria pra pesquisar mais fundo   [DA1.0 cort0.15 tédio0.0]
+  você: 'qual a capital da França?'  →  IARA: Paris (pesquisei e aprendi ·DA+)   [DA1.0 cort0.15 tédio0.0]
+
+## FIM DO DIA → SONO (consolida o importante, poda o frágil)
+  dormiu: fortaleceu 5 memórias (as que geraram dopamina) · podou 0 frágeis · K 11.6→13.8
+
+## MANHÃ SEGUINTE — o que sobrou?
+  'qual a capital do Peru?' → Lima
+  'qual a capital do Japao?' → Tokyo
+  'capital do butao?' → esqueceu/precisaria repesquisar
+
+## VEREDITO — a IARA VIVE (comportamentos validados)
+  ✓ PESQUISA quando não sabe (3B): 5× · ✓ PROFESSOR EXTERNO: 0×
+  ✓ PERGUNTA DE VOLTA no ambíguo: 1× · ✓ ABSTÉM honesto: 1×
+  ✓ CURIOSA sozinha (por tédio): 1× · ✓ REUSO instantâneo: 1×
+  ✓ SONO consolidou/podou · ✓ ESQUECE o não-usado. É um SER que vive, não um LLM que responde. wall 0.7min
+
+====================================================================
+# IARA DAEMON — o organismo persistente que VIVE (dia simulado)
+====================================================================
+IARA acorda. K=0 · hormônios em repouso. (percepção simulada; laço = daemon 24/7)
+
+## O DIA (percebe · sente · busca · pergunta · pesquisa)
+  você: 'qual a capital do Peru?'  →  IARA: Lima (pesquisei e aprendi ·DA+)   [DA1.0 cort0.10 tédio0.0]
+  você: 'qual a capital do Peru?'  →  IARA: Lima (já sabia)   [DA1.0 cort0.10 tédio0.0]
+  você: 'qual a capital?'  →  IARA: 🗨 De qual exatamente? (preciso da entidade)   [DA1.0 cort0.10 tédio0.0]
+  você: 'qual a capital do Japao?'  →  IARA: Tokyo (pesquisei e aprendi ·DA+)   [DA1.0 cort0.10 tédio0.0]
+  [vê: a dog]   [tédio0.1]
+  [vê: a strange new gadget]   [tédio0.1]
+  ⚡ (entediada) IARA pergunta SOZINHA e busca  →  Spanish (pesquisei e aprendi ·DA+)   [tédio0.0]
+  você: 'autor de grande sertao veredas?'  →  IARA: Guimaraes Rosa (professor externo me ensinou ·DA+)   [DA1.0 cort0.10 tédio0.0]
+  você: 'quem descobriu o oxigenio xyz?'  →  IARA: Não sei — pediria pra pesquisar mais fundo   [DA1.0 cort0.15 tédio0.0]
+  você: 'qual a capital da França?'  →  IARA: Paris (pesquisei e aprendi ·DA+)   [DA1.0 cort0.15 tédio0.0]
+
+## FIM DO DIA → SONO (consolida o importante, poda o frágil)
+  dormiu: fortaleceu 5 memórias (as que geraram dopamina) · podou 0 frágeis · K 11.6→13.8
+
+## MANHÃ SEGUINTE — o que sobrou?
+  'qual a capital do Peru?' → Lima
+  'qual a capital do Japao?' → Tokyo
+  'capital do butao?' → esqueceu/precisaria repesquisar
+
+## VEREDITO — a IARA VIVE (comportamentos validados)
+  ✓ PESQUISA quando não sabe (3B): 4× · ✓ PROFESSOR EXTERNO: 1×
+  ✓ PERGUNTA DE VOLTA no ambíguo: 1× · ✓ ABSTÉM honesto: 1×
+  ✓ CURIOSA sozinha (por tédio): 1× · ✓ REUSO instantâneo: 1×
+  ✓ SONO consolidou/podou · ✓ ESQUECE o não-usado. É um SER que vive, não um LLM que responde. wall 0.8min
+
+## iara_daemon — O ORGANISMO PERSISTENTE QUE VIVE (dia simulado, sem webcam/mic)
+O "vai além" do Leonardo: junta tudo num SER vivo (um laço só = daemon 24/7; aqui percepção simulada).
+Validado num dia: PESQUISA quando não sabe (3B local autônomo, auto-consistência+rejeita eco/stopword) 4×;
+PROFESSOR EXTERNO (Haiku/web hook — simulado sem API key, validado real em iara_taught) 1× (Grande Sertão→
+Guimarães Rosa, quando o 3B ecoa/falha); PERGUNTA DE VOLTA no ambíguo 1×; ABSTÉM honesto 1×; CURIOSA sozinha
+por TÉDIO (agência: pergunta-se "e a língua do Peru?" → Spanish) 1×; REUSO instantâneo 1×; SONO consolida
+(replay fortalece as de dopamina alta) + poda o frágil; ESQUECE o não-usado; MANHÃ ainda lembra. Hormônios
+(dopamina/cortisol/valência/tédio/energia) em tempo real. É intelig. REATIVA que VIVE, não LLM estático.
+iara_daemon.py. Falta p/ 24/7 real: percepção viva (webcam/mic) + professor externo com API + porte Rust.

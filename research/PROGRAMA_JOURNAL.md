@@ -2088,3 +2088,11 @@ cortisol/felicidade/curiosidade/noradrenalina/energia + base) + LINHA DO TEMPO m
 barra de FORÇA (vê o esquecimento), curiosa-sobre (gated), matemática no diário (verdade), chat (você↔IARA),
 diário ao vivo colorido, métricas. Rendering confirmado por pixel (grafo 3683px, timeline 3709px, 7 barras).
 Gerenciado pelo preview (fica vivo). iara_panel.py, http://localhost:3050 .
+
+## iara_panel v3 — CÉREBRO PERSISTENTE + memória permanente + bateria sólida (consertos do Leonardo)
+3 cobranças, todas consertadas e PROVADAS: (1) CÉREBRO SALVO NO DISCO (iara_brain_state.json, auto-save no
+aprender + a cada 3s; carrega no boot) — reiniciei o servidor SEM rodar bateria e voltou "19 memórias
+persistidas" + base. (2) NÃO ESQUECE MAIS: removido o decaimento passivo; memória permanente; esquecimento
+só opcional (sleep_forget, e consolidado/reusado é imune). (3) BATERIA SÓLIDA: 16 fatos + 10 contas (10/10
+exatas) + curiosidade gated (3 pesquisas) + RETENÇÃO 8/8; esqueceu=0; vivos 19. UI renderiza (grafo 19 nós/
+12.8k px, 19 memórias todas vivas). iara_panel.py, http://localhost:3050 (gerenciado pelo preview).

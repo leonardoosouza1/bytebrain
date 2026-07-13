@@ -9,6 +9,7 @@ import os,re,json,time,math,threading,subprocess,unicodedata
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 CLAUDE="/home/leonardo/.local/bin/claude"
+STATE_FILE=os.path.join(os.path.dirname(os.path.abspath(__file__)),"iara_brain_state.json")
 STOP=set("de da do a o e para com que uma um the of and is are foi sao com os as no na em por vira".split())
 def nrm(s): return re.sub(r"[^a-z0-9 ]","",unicodedata.normalize("NFKD",s).encode("ascii","ignore").decode().lower()).strip()
 def concept_of(q):
@@ -39,12 +40,27 @@ def compute(q):
 
 class Mind:
     THRESH=0.25
-    def __init__(s,budget=3): s.reset(budget)
+    def __init__(s,budget=3): s.reset(budget); s._load()
     def reset(s,budget=3):
         s.K={}; s.open=[]; s.dop=0.0; s.cort=0.10; s.val=0.30; s.cur=0.30; s.cur_base=0.30; s.ne=0.10; s.energy=1.0
         s.taught=0; s.calc=0; s.researched=0; s.forgot=0; s.budget=budget
         s.log=deque(maxlen=80); s.chat=deque(maxlen=40); s.hist=deque(maxlen=140); s.lock=threading.Lock()
         for _ in range(12): s.hist.append(s._h())
+    def _save(s):
+        try: json.dump({"K":s.K,"cur_base":s.cur_base,"taught":s.taught,"calc":s.calc,"researched":s.researched,
+            "forgot":s.forgot,"budget":s.budget,"chat":list(s.chat),"log":list(s.log)[:60]},
+            open(STATE_FILE,"w"),ensure_ascii=False)
+        except Exception: pass
+    def _load(s):
+        if not os.path.exists(STATE_FILE): return
+        try:
+            d=json.load(open(STATE_FILE))
+            s.K=d.get("K",{}); s.cur_base=d.get("cur_base",0.30); s.cur=s.cur_base
+            s.taught=d.get("taught",0); s.calc=d.get("calc",0); s.researched=d.get("researched",0)
+            s.forgot=d.get("forgot",0); s.budget=d.get("budget",3)
+            s.chat=deque(d.get("chat",[]),maxlen=40); s.log=deque(d.get("log",[]),maxlen=80)
+            s._log("sistema",f"cérebro carregado do disco: {len(s.K)} memórias persistidas")
+        except Exception: pass
     def _h(s): return dict(dopamina=round(s.dop,3),cortisol=round(s.cort,3),felicidade=round(s.val,3),curiosidade=round(s.cur,3),noradrenalina=round(s.ne,3),energia=round(s.energy,3),base=round(s.cur_base,3))
     def _log(s,kind,text,dop=None): s.log.appendleft(dict(t=time.strftime("%H:%M:%S"),kind=kind,text=text,dop=dop))
     def _say(s,who,text): s.chat.appendleft(dict(who=who,text=text))
@@ -59,7 +75,7 @@ class Mind:
                 say=f"{r[0]} = {r[1]} ✔ (calculei — verdade exata)"; s._say("iara",say); return dict(say=say)
             c=concept_of(q); k=nrm(c)
             if s.knows(c):
-                s.K[k]["consol"]+=0.4; s.val=min(1,s.val+0.05); s._log("sabe",f"{c} = {s.K[k]['v']}"); s._snap()
+                s.K[k]["consol"]+=0.4; s.K[k]["reuses"]=s.K[k].get("reuses",0)+1; s.val=min(1,s.val+0.05); s._log("sabe",f"{c} = {s.K[k]['v']}"); s._snap()
                 say=f"{c}? Isso eu sei: {s.K[k]['v']} 🙂"; s._say("iara",say); return dict(say=say)
             s.cur=min(1,s.cur+0.25+0.3*s.cur_base); s.cort=min(1,s.cort+0.08); s.dop=min(1,s.dop+0.15*s.cur)
             if k not in [nrm(x) for x in s.open]: s.open.append(c)
@@ -69,9 +85,9 @@ class Mind:
         with s.lock:
             c=concept.strip() or "?"; k=nrm(c); was=k in [nrm(x) for x in s.open]; s.ne=min(1,s.ne+0.15)
             dop=0.5+0.5*(was*s.cur); s.dop=min(1,s.dop+dop); s.val=min(1,s.val+0.35*dop); s.cort=max(0.1,s.cort-0.15)
-            s.K[k]={"v":answer.strip(),"consol":s.K.get(k,{}).get("consol",0)+(1+1.6*dop),"curious":was}
+            s.K[k]={"v":answer.strip(),"consol":s.K.get(k,{}).get("consol",0)+(1+1.6*dop),"curious":was,"reuses":s.K.get(k,{}).get("reuses",0)}
             s.cur_base=min(1,s.cur_base+0.09*dop); s.cur=s.cur_base
-            s.open=[x for x in s.open if nrm(x)!=k]; s.taught+=1; s._log("aprende",f"{c} = {answer.strip()}",round(dop,2)); s._snap()
+            s.open=[x for x in s.open if nrm(x)!=k]; s.taught+=1; s._log("aprende",f"{c} = {answer.strip()}",round(dop,2)); s._snap(); s._save()
             say=f"Ahh! {c} é {answer.strip()}! (senti dopamina +{dop:.2f}, aprendi — e fiquei mais curiosa)"; s._say("iara",say); return dict(say=say)
     def wonder(s):
         with s.lock:
@@ -89,14 +105,18 @@ class Mind:
             a=r.stdout.strip().split("\n")[0].strip().rstrip("."); return a if (a and 1<len(a)<60) else None
         except Exception: return None
     def tick(s,dt=1.0):
-        with s.lock:
+        with s.lock:                                          # só RELAXA hormônio — memória NÃO decai (permanente)
             s.dop*=0.85; s.cort=0.10+(s.cort-0.10)*0.9; s.val=0.3+(s.val-0.3)*0.97; s.ne=0.10+(s.ne-0.10)*0.85
-            s.cur=s.cur_base+(s.cur-s.cur_base)*0.7; s.energy=min(1,s.energy+0.02)
-            for k in list(s.K):
-                was=s.K[k]["consol"]>=s.THRESH; s.K[k]["consol"]*=math.exp(-dt/(6*(1+s.K[k].get("consol",1)*0.15)))
-                if was and s.K[k]["consol"]<s.THRESH: s.forgot+=1; s._log("esquece",f"esqueceu '{k}' (não revisado)")
-                if s.K[k]["consol"]<0.08: del s.K[k]
-            s._snap()
+            s.cur=s.cur_base+(s.cur-s.cur_base)*0.7; s.energy=min(1,s.energy+0.02); s._snap()
+    def sleep_forget(s,rounds=6):
+        """esquecimento OPCIONAL (só quando pedido): decai o FRACO/não-revisado; o consolidado sobrevive."""
+        with s.lock:
+            for _ in range(rounds):
+                for k in list(s.K):
+                    if s.K[k].get("reuses",0)>=1 or s.K[k]["consol"]>=3: continue   # consolidado = permanente
+                    was=s.K[k]["consol"]>=s.THRESH; s.K[k]["consol"]*=0.7
+                    if was and s.K[k]["consol"]<s.THRESH: s.forgot+=1; s._log("esquece",f"esqueceu '{k}' (frágil, não revisado)")
+            s._save()
     def graph(s):
         ks=list(s.K); words={k:set(w for w in (k+" "+s.K[k]["v"]).split() if len(w)>=4 and w not in STOP) for k in ks}
         nodes=[dict(id=k,v=s.K[k]["v"],forca=round(s.K[k]["consol"],2),curious=s.K[k].get("curious",False),vivo=s.K[k]["consol"]>=s.THRESH) for k in ks]
@@ -109,25 +129,36 @@ class Mind:
             stats=dict(ensinada=s.taught,calculou=s.calc,pesquisou=s.researched,esqueceu=s.forgot,orcamento=s.budget,vivos=len(mem)))
 
 M=Mind()
+FATOS=[("fotossintese","planta vira luz do sol em energia"),("gravidade","forca que atrai as coisas"),
+ ("dna","molecula das instrucoes da vida"),("celula","unidade basica da vida"),
+ ("atomo","nucleo com protons e eletrons"),("neuronio","celula que transmite sinais no cerebro"),
+ ("oxigenio","gas que a gente respira"),("agua","dois hidrogenios e um oxigenio"),
+ ("sol","estrela do centro do sistema solar"),("lua","satelite natural da terra"),
+ ("coracao","orgao que bombeia o sangue"),("vulcao","montanha que expele lava"),
+ ("dinossauro","reptil gigante ja extinto"),("computador","maquina que processa informacao"),
+ ("musica","arte de organizar sons"),("dopamina","hormonio do prazer e da recompensa")]
+MATH=["quanto é 347 mais 89?","quanto é 1000 menos 333?","quanto é 12 vezes 12?","qual a raiz de 144?",
+ "quanto é 2 elevado a 10?","quanto é 15% de 200?","quanto é 250 dividido por 5?","quanto é 7 vezes 8?",
+ "qual a raiz de 81?","quanto é 20% de 150?"]
 def battery():
     time.sleep(1)
-    CUR=[("fotossintese","planta vira luz do sol em energia"),("gravidade","forca que atrai as coisas"),
-         ("dna","molecula das instrucoes da vida"),("celula","unidade basica da vida"),
-         ("atomo","nucleo com protons e eletrons"),("neuronio","celula que transmite sinais no cerebro")]
-    M._log("bateria","=== FASE 1: ensinar + gerar curiosidade ===")
-    for c,a in CUR: M.ask(f"o que é {c}?"); time.sleep(0.5); M.teach(c,a); time.sleep(0.5)
-    M._log("bateria","=== FASE 2: MATEMÁTICA (verdade) ===")
-    for q in ["quanto é 347 mais 89?","quanto é 1000 menos 333?","quanto é 12 vezes 12?","qual a raiz de 144?","quanto é 2 elevado a 10?","quanto é 15% de 200?"]: M.ask(q); time.sleep(0.5)
-    M._log("bateria","=== FASE 3: curiosidade GATED ===")
-    for c in ["entropia","big bang","tectonica","fusao nuclear","buraco negro"]: M.ask(f"o que é {c}?"); time.sleep(0.3); M.wonder(); time.sleep(0.4)
-    M._log("bateria","=== FASE 4: esquecimento (revisa alguns) ===")
-    for _ in range(7): M.tick(1.0); time.sleep(0.2)
-    for c in ["fotossintese","atomo","dna"]:
-        for _ in range(3): M.ask(f"o que é {c}?")
-    for _ in range(9): M.tick(1.0); time.sleep(0.2)
-    M._log("bateria",f"=== FIM: vive {M.state()['stats']['vivos']} · base {M.cur_base:.2f} · calculou {M.calc} · esqueceu {M.forgot} ===")
-def decayer():
-    while True: time.sleep(3); M.tick(0.5)
+    M._log("bateria","=== FASE 1: APRENDER 16 fatos (permanente, salvo no disco) ===")
+    for c,a in FATOS: M.ask(f"o que é {c}?"); time.sleep(0.3); M.teach(c,a); time.sleep(0.3)
+    M._log("bateria","=== FASE 2: MATEMÁTICA — 10 contas (verdade exata) ===")
+    for q in MATH: M.ask(q); time.sleep(0.35)
+    M._log("bateria","=== FASE 3: curiosidade GATED (orçamento) ===")
+    for c in ["entropia","big bang","buraco negro","tectonica","fusao nuclear"]:
+        M.ask(f"o que é {c}?"); time.sleep(0.3); M.wonder(); time.sleep(0.4)
+    M._log("bateria","=== FASE 4: RETENÇÃO — prova que NÃO esqueceu ===")
+    ok=0
+    for c,a in FATOS[:8]:
+        r=M.ask(f"o que é {c}?"); ok+= ("Isso eu sei" in r.get("say",""))
+        time.sleep(0.15)
+    st=M.state()['stats']
+    M._log("bateria",f"=== FIM: sabe {st['vivos']} · reteve {ok}/8 · calculou {st['calculou']} · base {M.cur_base:.2f} · esqueceu {M.forgot} ===")
+    M._save()
+def relaxer():
+    while True: time.sleep(3); M.tick(0.5); M._save()   # só relaxa hormônio + SALVA (não esquece)
 
 PAGE=r"""<!doctype html><html lang=pt><head><meta charset=utf8><title>IARA · Centro de Observação</title><style>
 *{box-sizing:border-box;margin:0;font-family:ui-monospace,Menlo,Consolas,monospace}
@@ -231,11 +262,11 @@ class H(BaseHTTPRequestHandler):
         elif s.path=="/teach": r=M.teach(d.get("concept",""),d.get("a",""))
         elif s.path=="/wonder": r=M.wonder()
         elif s.path=="/battery": threading.Thread(target=battery,daemon=True).start(); r={"say":"bateria iniciada"}
-        elif s.path=="/reset": M.reset(); r={"say":"resetada"}
+        elif s.path=="/reset": M.reset(); M._save(); r={"say":"resetada"}
         elif s.path=="/budget": M.budget=max(0,int(d.get("n",3))); r={"say":f"orçamento {M.budget}"}
         else: r={"err":1}
         s._j(r)
 if __name__=="__main__":
-    threading.Thread(target=decayer,daemon=True).start()
+    threading.Thread(target=relaxer,daemon=True).start()
     print("  ►►►  IARA · Centro de Observação em http://localhost:3050",flush=True)
     ThreadingHTTPServer(("127.0.0.1",3050),H).serve_forever()

@@ -16,21 +16,28 @@ def concept_of(q):
     x=nrm(q); m=re.search(r"(?:o que (?:e|sao)|que e|quem (?:e|foi)|defina|conhece|sabe[a-z ]* que e)\s+(.+)",x)
     c=(m.group(1) if m else x); c=re.sub(r"^(o |a |os |as |um |uma |e |de )+","",c).strip(" ?.")
     return c or x
+def strip_acc(s): return "".join(c for c in unicodedata.normalize("NFKD",s) if not unicodedata.combining(c))
+WN={"zero":0,"um":1,"uma":1,"dois":2,"duas":2,"tres":3,"quatro":4,"cinco":5,"seis":6,"sete":7,"oito":8,"nove":9,
+ "dez":10,"onze":11,"doze":12,"treze":13,"catorze":14,"quatorze":14,"quinze":15,"dezesseis":16,"dezessete":17,
+ "dezoito":18,"dezenove":19,"vinte":20,"trinta":30,"quarenta":40,"cinquenta":50,"cem":100,"mil":1000}
 def compute(q):
-    x=nrm(q).replace("elevado a","^").replace("ao quadrado","^ 2").replace(" mais "," + ").replace(" menos "," - ")
-    x=x.replace(" vezes "," * ").replace(" dividido por "," / ").replace(" divida "," ").replace(" por "," / ")
-    m=re.search(r"raiz.*?(\d+[.,]?\d*)",x)
-    if m: return (f"√{m.group(1)}", round(math.sqrt(float(m.group(1).replace(',','.'))),4))
-    m=re.search(r"(\d+[.,]?\d*)\s*%?\s*(?:por ?cento)?\s*de\s*(\d+[.,]?\d*)",x)
-    if ("%" in q or "por cento" in x) and m:
-        a=float(m.group(1).replace(',','.')); b=float(m.group(2).replace(',','.')); return (f"{m.group(1)}% de {m.group(2)}", round(a/100*b,4))
-    m=re.search(r"(-?\d+[.,]?\d*)\s*(\^|\+|\-|\*|x|/)\s*(-?\d+[.,]?\d*)",x)
+    x=strip_acc(q).lower()                                # NÃO tira os símbolos + - * / (só acento)
+    for w,n in WN.items(): x=re.sub(rf"\b{w}\b",str(n),x) # número por extenso → dígito
+    x=x.replace("elevado a","^").replace("ao quadrado","^2").replace("por cento","%")
+    x=re.sub(r"\bmais\b","+",x); x=re.sub(r"\bmenos\b","-",x); x=re.sub(r"\bvezes\b","*",x)
+    x=x.replace("dividido por","/").replace("dividido","/")
+    x=re.sub(r"(\d)\s*[x×]\s*(\d)",r"\1*\2",x)            # 12x12 → 12*12
+    m=re.search(r"raiz\D*?(\d+[.,]?\d*)",x)
+    if m: v=float(m.group(1).replace(",",".")); return (f"√{m.group(1)}", round(math.sqrt(v),4))
+    m=re.search(r"(\d+[.,]?\d*)\s*%\s*de\s*(\d+[.,]?\d*)",x)
+    if m: a=float(m.group(1).replace(",",".")); b=float(m.group(2).replace(",",".")); return (f"{m.group(1)}% de {m.group(2)}", round(a/100*b,4))
+    m=re.search(r"(-?\d+[.,]?\d*)\s*([+\-*/^])\s*(-?\d+[.,]?\d*)",x)
     if m:
-        a=float(m.group(1).replace(',','.')); op=m.group(2); b=float(m.group(3).replace(',','.'))
+        a=float(m.group(1).replace(",",".")); op=m.group(2); b=float(m.group(3).replace(",","."))
         try:
             if op=="+": r=a+b
             elif op=="-": r=a-b
-            elif op in ("*","x"): r=a*b
+            elif op=="*": r=a*b
             elif op=="/": r=(a/b if b else float('nan'))
             elif op=="^": r=a**b
             else: return None

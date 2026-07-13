@@ -6,7 +6,7 @@ PESQUISA quando não sabe (3B local autônomo + hook professor externo Haiku/web
 ambíguo · CONSOLIDA no SONO (replay + poda) · ESQUECE o não-usado. Aqui a percepção é SIMULADA (webcam/mic
 em uso) — um 'dia' roteirizado — mas o laço é o mesmo de um daemon 24/7. Valida os comportamentos vivos.
 GPU (3B como substrato+pesquisador)."""
-import os,sys,re,time,math,unicodedata
+import os,sys,re,time,math,unicodedata,subprocess
 HERE=os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0,HERE)
 import torch
 from iara_brain_grow import Brain, first_word
@@ -15,8 +15,8 @@ def log(s):
     print(s,flush=True); open(JOUR,"a").write(s+"\n")
 def nrm(s): return re.sub(r"[^a-z0-9 ]","",unicodedata.normalize("NFKD",s).encode("ascii","ignore").decode().lower()).strip()
 
-# professor EXTERNO (Haiku/web) — simulado aqui (sem API key); validado real em iara_taught.py
-EXTERNAL={"autor de grande sertao veredas":"Guimaraes Rosa","quem pintou abaporu":"Tarsila"}
+# professor CLAUDE via SDK/CLI — usa a SUBSCRIPTION do plano do Leonardo (sem API key, sem modelo local)
+CLAUDE="/home/leonardo/.local/bin/claude"
 PT2EN={"peru":"Peru","japao":"Japan","franca":"France","frança":"France","butao":"Bhutan","brasil":"Brazil",
  "alemanha":"Germany","chile":"Chile","egito":"Egypt","portugal":"Portugal"}
 STOP={"the","a","an","o","um","uma","de","in","it","is","that","this","he","she","yes","no","i"}
@@ -47,7 +47,13 @@ class Daemon:
         a=s._ans(s.B._gen(f"Question: {q}\nAnswer:",5)); b=s._ans(s.B._gen(f"Q: {q} A:",5))
         return a if agree(a,b) else None                       # auto-consistente, sem eco = confiável
     def _research_external(s,q):
-        return EXTERNAL.get(nrm(q))                             # hook Haiku/web (aqui simulado)
+        """professor CLAUDE (SDK/subscription) — chamado quando o 3B local não sabe. Sem API key."""
+        try:
+            r=subprocess.run([CLAUDE,"-p",f"Responda em no máximo 4 palavras, só o fato essencial, sem explicar nem repetir a pergunta: {q}"],
+                             capture_output=True,text=True,timeout=90)
+            a=r.stdout.strip().split("\n")[0].strip().rstrip(".").strip()
+            return a if (a and 1<len(a)<45 and nrm(a) not in nrm(q)) else None
+        except Exception: return None
     def _learn(s,q,v,src,surprise=1.0):
         key=nrm(q); fam=len([1 for k in s.K if k==key])
         rpe=surprise*(1.0)*(1-0.4*s.cort); s.dop=min(1,s.dop+rpe); s.val=min(1,s.val+0.3*rpe)
@@ -68,7 +74,7 @@ class Daemon:
         v=s._research_3b(q)
         if v: s._learn(q,v,"3B"); s.diary.append(("pesquisou_3B",q,v)); return f"{v} (pesquisei e aprendi ·DA+)"
         v=s._research_external(q)
-        if v: s._learn(q,v,"externo",surprise=1.3); s.diary.append(("professor_externo",q,v)); return f"{v} (professor externo me ensinou ·DA+)"
+        if v: s._learn(q,v,"claude",surprise=1.3); s.diary.append(("professor_claude",q,v)); return f"{v} (professor Claude/subscription me ensinou ·DA+)"
         s.cort=min(1,s.cort+0.05); s.diary.append(("abstem",q,"—")); return "Não sei — pediria pra pesquisar mais fundo"
     def see(s,concept):
         s.bored=max(0,s.bored-0.2)
@@ -144,7 +150,7 @@ for q in ["qual a capital do Peru?","qual a capital do Japao?","capital do butao
 
 log(f"\n## VEREDITO — a IARA VIVE (comportamentos validados)")
 beh=[b[0] for b in D.diary]
-log(f"  ✓ PESQUISA quando não sabe (3B): {beh.count('pesquisou_3B')}× · ✓ PROFESSOR EXTERNO: {beh.count('professor_externo')}×")
+log(f"  ✓ PESQUISA quando não sabe (3B): {beh.count('pesquisou_3B')}× · ✓ PROFESSOR CLAUDE (subscription): {beh.count('professor_claude')}×")
 log(f"  ✓ PERGUNTA DE VOLTA no ambíguo: {beh.count('pergunta_de_volta')}× · ✓ ABSTÉM honesto: {beh.count('abstem')}×")
 log(f"  ✓ CURIOSA sozinha (por tédio): {beh.count('curiosa')}× · ✓ REUSO instantâneo: {beh.count('reuso')}×")
 log(f"  ✓ SONO consolidou/podou · ✓ ESQUECE o não-usado. É um SER que vive, não um LLM que responde. wall {(time.time()-t0)/60:.1f}min")

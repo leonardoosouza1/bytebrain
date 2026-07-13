@@ -2013,3 +2013,43 @@ por TÉDIO (agência: pergunta-se "e a língua do Peru?" → Spanish) 1×; REUSO
 (replay fortalece as de dopamina alta) + poda o frágil; ESQUECE o não-usado; MANHÃ ainda lembra. Hormônios
 (dopamina/cortisol/valência/tédio/energia) em tempo real. É intelig. REATIVA que VIVE, não LLM estático.
 iara_daemon.py. Falta p/ 24/7 real: percepção viva (webcam/mic) + professor externo com API + porte Rust.
+
+====================================================================
+# IARA DAEMON — o organismo persistente que VIVE (dia simulado)
+====================================================================
+IARA acorda. K=0 · hormônios em repouso. (percepção simulada; laço = daemon 24/7)
+
+## O DIA (percebe · sente · busca · pergunta · pesquisa)
+  você: 'qual a capital do Peru?'  →  IARA: Lima (pesquisei e aprendi ·DA+)   [DA1.0 cort0.10 tédio0.0]
+  você: 'qual a capital do Peru?'  →  IARA: Lima (já sabia)   [DA1.0 cort0.10 tédio0.0]
+  você: 'qual a capital?'  →  IARA: 🗨 De qual exatamente? (preciso da entidade)   [DA1.0 cort0.10 tédio0.0]
+  você: 'qual a capital do Japao?'  →  IARA: Tokyo (pesquisei e aprendi ·DA+)   [DA1.0 cort0.10 tédio0.0]
+  [vê: a dog]   [tédio0.1]
+  [vê: a strange new gadget]   [tédio0.1]
+  ⚡ (entediada) IARA pergunta SOZINHA e busca  →  Spanish (pesquisei e aprendi ·DA+)   [tédio0.0]
+  você: 'autor de grande sertao veredas?'  →  IARA: Guimarães Rosa (professor Claude/subscription me ensinou ·DA+)   [DA1.0 cort0.10 tédio0.0]
+  você: 'quem descobriu o oxigenio xyz?'  →  IARA: Priestley e Scheele (professor Claude/subscription me ensinou ·DA+)   [DA1.0 cort0.10 tédio0.0]
+  você: 'qual a capital da França?'  →  IARA: Paris (pesquisei e aprendi ·DA+)   [DA1.0 cort0.10 tédio0.0]
+
+## FIM DO DIA → SONO (consolida o importante, poda o frágil)
+  dormiu: fortaleceu 6 memórias (as que geraram dopamina) · podou 0 frágeis · K 14.0→16.6
+
+## MANHÃ SEGUINTE — o que sobrou?
+  'qual a capital do Peru?' → Lima
+  'qual a capital do Japao?' → Tokyo
+  'capital do butao?' → esqueceu/precisaria repesquisar
+
+## VEREDITO — a IARA VIVE (comportamentos validados)
+  ✓ PESQUISA quando não sabe (3B): 4× · ✓ PROFESSOR CLAUDE (subscription): 2×
+  ✓ PERGUNTA DE VOLTA no ambíguo: 1× · ✓ ABSTÉM honesto: 0×
+  ✓ CURIOSA sozinha (por tédio): 1× · ✓ REUSO instantâneo: 1×
+  ✓ SONO consolidou/podou · ✓ ESQUECE o não-usado. É um SER que vive, não um LLM que responde. wall 1.0min
+
+## iara_daemon — PROFESSOR CLAUDE via SDK/SUBSCRIPTION (sem API key, sem modelo local)
+Correção (Leonardo apontou): o professor NÃO precisa de API key nem de modelo local — usa o `claude` CLI
+headless (`claude -p "..."`), que roda na SUBSCRIPTION do plano, como nos outros projetos. Tentei 7B GGUF
+local (segfaulta no HIP — já sabíamos) e cogitei API key (bobagem). Certo = SDK/CLI. Ligado no daemon:
+quando o 3B local não sabe, chama `claude -p` → aprende. Resultado: "autor de Grande Sertão"→Claude
+"Guimarães Rosa"; "oxigênio xyz"→Claude "Priestley e Scheele" (professor muito melhor que o 3B, abstenção
+caiu a 0). Tiers 100% locais/plano: grafo → 3B local (torch, rápido) → Claude (subscription, fundo). Zero
+custo extra. iara_daemon._research_external = subprocess([claude,-p,...]).

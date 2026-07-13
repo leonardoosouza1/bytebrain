@@ -1682,3 +1682,13 @@ Japão/Egito/Wakanda-fake) + ver Eiffel/cão/carro. Testado: /ask "capital da Fr
 neurônios (L33 Lux, L35 conformity)+DA=0.8; /see eiffel→"Torre Eiffel→France→Paris" DA=1.0. Rodar:
 python iara_observatory.py → http://localhost:3030 . Honesto: tudo é o disparo/estado real, incl. neurônios
 não-decodificados (logit-lens 1-a-1 é ruidoso, como já sabíamos).
+
+## iara_face — O ROSTO VIVO: olha seu movimento, fala, expressa hormônios, grava a sessão
+Observatório encarnado (porta 3030). ROSTO SVG (olhos/pupilas/pálpebras/sobrancelha/boca) com expressão
+puxada pelos hormônios (dopamina→sorriso, cortisol→sobrancelha tensa, energia→pálpebra, noradrenalina→
+olhos arregalados); boca anima ao FALAR (TTS não-bloqueante via Popen). OLHAR segue o MOVIMENTO: thread
+pega frames da webcam (320x240) e faz FRAME-DIFF (o "modelo de vídeo" leve, numpy) → centroide do movimento
+→ pupilas apontam; movimento sobe a noradrenalina. FALA push-to-talk (🎤: grava mic → Whisper → cérebro →
+TTS). SESSÃO grava tudo (viu/ouviu/respondeu + hormônios) → /session + botão revisar. Testado: /ask Egito→
+Cairo 1180ms DA=0.8; /frame serve webcam; motion loop ativo. Rodar: python iara_face.py → localhost:3030.
+Honesto: gaze por frame-diff real; expressão = estado hormonal real; rosto é SVG estilizado (não fotorreal).

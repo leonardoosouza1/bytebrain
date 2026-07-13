@@ -38,8 +38,32 @@ class Mind:
         self.commit=0; self.reuse=0; self.abst=0; self.session=deque(maxlen=400)
         self.lock=threading.Lock(); self._prev=None
         for _ in range(20): self.hist.append(self._h())
+        self.cam_ok=False; self.cam_dev=None
+        threading.Thread(target=self._capture_supervisor,daemon=True).start()   # UM ffmpeg, auto-cura
         threading.Thread(target=self._motion_loop,daemon=True).start()
         print("[IARA no ar — rosto pronto]",flush=True)
+    def _find_cam(self):
+        import glob
+        for d in sorted(glob.glob("/dev/video*")):
+            try:
+                r=subprocess.run(["ffmpeg","-y","-f","v4l2","-video_size","320x240","-i",d,"-frames:v","1","/tmp/iara_probe.jpg"],
+                    stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=5)
+                if r.returncode==0: return d
+            except Exception: pass
+        return None
+    def _capture_supervisor(self):
+        """garante UM ffmpeg persistente escrevendo CAM; se a webcam cair/voltar, se cura (checa a cada 5s)."""
+        proc=None
+        while True:
+            if proc is None or proc.poll() is not None:
+                dev=self._find_cam()
+                if dev:
+                    proc=subprocess.Popen(["ffmpeg","-y","-f","v4l2","-framerate","5","-video_size","320x240",
+                        "-i",dev,"-update","1","-qscale:v","5",CAM],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                    self.cam_ok=True; self.cam_dev=dev; print(f"[webcam ativa em {dev}]",flush=True)
+                else:
+                    self.cam_ok=False; self.cam_dev=None
+            time.sleep(5)
     def _h(self): return dict(da=round(self.da,3),cort=round(self.cort,3),ne=round(self.ne,3),e=round(self.energy,3))
     def _log(self,kind,detail):
         self.session.append(dict(t=round(time.time()%100000,1),kind=kind,detail=detail,h=self._h()))
@@ -48,14 +72,12 @@ class Mind:
             self.da*=0.92; self.ne=0.10+(self.ne-0.10)*0.90; self.cort=0.10+(self.cort-0.10)*0.97
             self.energy=min(1.0,self.energy+0.008); self.hist.append(self._h())
     def _motion_loop(self):
+        """só LÊ o último frame (a webcam já está aberta) e faz frame-diff. Barato."""
         while True:
             try:
-                subprocess.run(["ffmpeg","-y","-f","v4l2","-video_size","320x240","-i","/dev/video0",
-                    "-frames:v","1",CAM],check=False,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=4)
                 g=np.asarray(Image.open(CAM).convert("L").resize((80,60)),dtype=np.float32)
                 if self._prev is not None:
-                    d=np.abs(g-self._prev); mask=d>22
-                    frac=float(mask.mean())
+                    d=np.abs(g-self._prev); mask=d>22; frac=float(mask.mean())
                     if frac>0.008:
                         ys,xs=np.where(mask); mx=float(xs.mean())/80; my=float(ys.mean())/60
                         with self.lock:
@@ -65,7 +87,7 @@ class Mind:
                         with self.lock: self.mag*=0.6
                 self._prev=g
             except Exception: pass
-            time.sleep(0.6)
+            time.sleep(0.5)
     def _active_neurons(self,k=14):
         out=[]
         for L in self.b.DEEP:
@@ -135,7 +157,7 @@ class Mind:
         return dict(nodes=list(nodes.values()),edges=edges)
     def state(self):
         return dict(hormones=self._h(),history=list(self.hist),neurons=self.neurons,trace=self.trace,graph=self.graph(),
-            face=dict(mx=round(self.mx,3),my=round(self.my,3),mag=round(self.mag,3),speaking=time.time()<self.speaking_until),
+            face=dict(mx=round(self.mx,3),my=round(self.my,3),mag=round(self.mag,3),speaking=time.time()<self.speaking_until,cam=self.cam_ok),
             perception=dict(img=self.last_img,concepts=self.last_concepts),q=self.last_q,a=self.last_a,ms=round(getattr(self,'last_ms',0),1),
             stats=dict(facts=len(self.b.G),perceived=len(self.b.perceived),commit=self.commit,reuse=self.reuse,abstain=self.abst,events=len(self.session)))
     def session_data(self): return list(self.session)
@@ -201,14 +223,16 @@ async function see(n){ST=await post('/see',{img:n});render()}
 async function post(u,b){return (await fetch(u,{method:'POST',body:JSON.stringify(b)})).json()}
 function toggleRev(){rev=!rev;revwrap.style.display=rev?'block':'none';if(rev)loadSess()}
 async function loadSess(){const s=await(await fetch('/session')).json();sess.innerHTML=s.map(e=>`<div>t${e.t} · <b style=color:#8fa>${e.kind}</b> · ${e.detail} · <span style=color:#e24b4a>c${e.h.cort}</span> <span style=color:#63c923>d${e.h.da}</span></div>`).reverse().join('')}
-async function poll(){try{const s=await(await fetch('/state')).json();ST=s;render();document.getElementById('cam').src='/frame?'+Date.now()}catch(e){}}
+async function poll(){try{const s=await(await fetch('/state')).json();ST=s;render()}catch(e){}}
+function refreshCam(){const c=document.getElementById('cam');const n=new Image();n.onload=()=>{c.src=n.src};n.src='/frame?'+Date.now()}
 function render(){if(!ST)return;const H=ST.hormones,F=ST.face;
  let h='';for(const k in HC){const val=H[k],c=HC[k];h+=`<div class=g><div class=lab><span>${c[1]}</span><span>${val.toFixed(2)}</span></div><div class=track><div class=fill style="width:${val*100}%;background:${c[0]}"></div></div></div>`}horm.innerHTML=h;
  neu.innerHTML=ST.neurons.map(x=>`<div class=neu><span class=nx>L${x.layer}</span><span class=nl>${x.concept}</span><span class=nb style="width:${Math.max(6,x.act*80)}px"></span></div>`).join('')||'—';
  trace.innerHTML=(ST.trace||[]).map(t=>`<div>${t}</div>`).join('')||'<div>—</div>';
  const s=ST.stats;stats.innerHTML=`<div class=stat><span>fatos</span><b>${s.facts}</b></div><div class=stat><span>entidades</span><b>${s.perceived}</b></div><div class=stat><span>aprendidos</span><b>${s.commit}</b></div><div class=stat><span>reuso</span><b>${s.reuse}</b></div><div class=stat><span>abstenções</span><b>${s.abstain}</b></div><div class=stat><span>eventos</span><b>${s.events}</b></div><div class=stat><span>latência</span><b>${ST.ms}ms</b></div>`;
- qn.textContent=ST.q||'';ans.textContent=ST.a||'';motion.textContent='movimento '+(F.mag>0.15?'●':'○')+' '+(F.mag).toFixed(2);
- status.textContent=F.speaking?'falando…':(F.mag>0.2?'te vejo mexer':'olhando…');
+ qn.textContent=ST.q||'';ans.textContent=ST.a||'';
+ motion.textContent=F.cam?('movimento '+(F.mag>0.15?'●':'○')+' '+(F.mag).toFixed(2)):'webcam offline — replugue';
+ status.textContent=F.speaking?'falando…':(!F.cam?'sem webcam':(F.mag>0.2?'te vejo mexer':'olhando…'));
  pc.innerHTML=(ST.perception.concepts||[]).map(c=>`<span class=tag>${c[0]} ${(c[1]*100|0)}%</span>`).join('')||'<span class=nx>nada visto</span>';
  drawSpark();drawGraph()}
 function drawSpark(){const c=spark,x=c.getContext('2d');c.width=c.clientWidth;const W=c.width,Hh=64;x.clearRect(0,0,W,Hh);const hh=ST.history||[];for(const k in HC){x.beginPath();x.strokeStyle=HC[k][0];x.lineWidth=1.2;hh.forEach((p,i)=>{const px=i/(hh.length-1)*W,py=Hh-p[k]*Hh*.9-2;i?x.lineTo(px,py):x.moveTo(px,py)});x.stroke()}}
@@ -234,7 +258,7 @@ function drawFace(){if(!ST){requestAnimationFrame(drawFace);return}const H=ST.ho
  const mouth=`<path d="M${105-mw} ${my} Q105 ${mc} ${105+mw} ${my} Q105 ${my+mo} ${105-mw} ${my} Z" fill=#c0506a stroke=#7a2a45/>`;
  face.innerHTML=`<rect x=25 y=25 width=160 height=150 rx=48 fill=#12151d stroke=#2a3550/>`+eyebrow(70,1)+eyebrow(140,-1)+eye(70)+eye(140)+mouth;
  requestAnimationFrame(drawFace)}
-setInterval(poll,400);poll();drawFace();
+setInterval(poll,500);setInterval(refreshCam,1000);poll();refreshCam();drawFace();
 </script></body></html>"""
 
 class Hd(BaseHTTPRequestHandler):

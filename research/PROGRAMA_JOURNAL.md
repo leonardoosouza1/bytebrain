@@ -2078,3 +2078,13 @@ espera professor" (NÃO sai pesquisando à vontade, como o Leonardo pediu). Bate
 roda sozinha): Fase1 ensina 6 (curiosidade-base 0.30→1.0), Fase2 matemática 7/7, Fase3 curiosidade gated
 (3 pesquisa, resto espera), Fase4 esquecimento (revisa 3=sobrevivem, não-revisados=esquece, Ebbinghaus).
 iara_panel.py. Professor fundo = claude subscription (gated).
+
+## iara_panel v2 — CENTRO DE OBSERVAÇÃO completo (tudo pela UI, não curl)
+Refeito a pedido do Leonardo: nada de mandar POST na mão. TUDO por botão/campo: conversar (campo+enviar),
+ensinar (conceito+resposta), 🔥 bateria de fogo, 💭 pensar sozinha, orçamento de pesquisa (set), 🧹 reset.
+Mostra o CÉREBRO COMPLETO: grafo do conhecimento força-dirigido (nós=conceitos, tamanho=força da memória,
+cor=aprendido/era-curiosa/esmaecendo, arestas=associação por palavra), hormônios (7 gauges: dopamina/
+cortisol/felicidade/curiosidade/noradrenalina/energia + base) + LINHA DO TEMPO multi-linha, memória com
+barra de FORÇA (vê o esquecimento), curiosa-sobre (gated), matemática no diário (verdade), chat (você↔IARA),
+diário ao vivo colorido, métricas. Rendering confirmado por pixel (grafo 3683px, timeline 3709px, 7 barras).
+Gerenciado pelo preview (fica vivo). iara_panel.py, http://localhost:3050 .

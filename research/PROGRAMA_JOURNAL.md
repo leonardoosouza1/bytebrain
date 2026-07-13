@@ -2067,3 +2067,14 @@ CURIOSIDADE-BASE (ela associa que buscar dá prazer). Conversa real validou o ar
 CURIOSIDADE-BASE cresceu 0.30→0.61 na conversa; dopamina de aprender subiu junto; ela virou PROATIVA
 (pesquisa sozinha quando curiosa demais). É o que o Leonardo pediu: dopamina↔aprender↔mais curiosidade.
 iara_mind_server.py (/ask /teach /wonder /state, porta 3050). Professor fundo = claude subscription.
+
+## iara_panel — PAINEL + MATEMÁTICA (verdade) + pesquisa GATED + bateria de fogo (p/ o Leonardo avaliar)
+Painel web dark (localhost:3050) mostra ao vivo: hormônios (gauges), curiosidade-base (curva que cresce ao
+aprender), o que ela sabe, sobre o que está curiosa, e o DIÁRIO colorido (aprende/calcula/não-sabe/esquece/
+gated). Órgão de MATEMÁTICA: ela CALCULA a verdade exata (soma/sub/mult/div/raiz/%/potência) — bug achado:
+dict eager estourava a**b (1000^333=OverflowError→engolia a subtração); consertado com avaliação preguiçosa,
+7/7 agora. Pesquisa GATED: orçamento de 3 buscas no claude; esgotado → "queria saber X mas sem orçamento →
+espera professor" (NÃO sai pesquisando à vontade, como o Leonardo pediu). Bateria de fogo (POST /battery,
+roda sozinha): Fase1 ensina 6 (curiosidade-base 0.30→1.0), Fase2 matemática 7/7, Fase3 curiosidade gated
+(3 pesquisa, resto espera), Fase4 esquecimento (revisa 3=sobrevivem, não-revisados=esquece, Ebbinghaus).
+iara_panel.py. Professor fundo = claude subscription (gated).

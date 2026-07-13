@@ -1692,3 +1692,33 @@ pega frames da webcam (320x240) e faz FRAME-DIFF (o "modelo de vídeo" leve, num
 TTS). SESSÃO grava tudo (viu/ouviu/respondeu + hormônios) → /session + botão revisar. Testado: /ask Egito→
 Cairo 1180ms DA=0.8; /frame serve webcam; motion loop ativo. Rodar: python iara_face.py → localhost:3030.
 Honesto: gaze por frame-diff real; expressão = estado hormonal real; rosto é SVG estilizado (não fotorreal).
+
+==================================================================
+# VERIFICADOR CALCULADO — 'eu sei' vs 'blefo' das ativações reais
+==================================================================
+  15 reais + 12 falsas · 40 features das ativações profundas · 108s
+
+## RESULTADO (leave-one-out — testa em entidade nunca vista no ajuste)
+  READOUT FECHADO (ridge, 1 solve): 100% de acerto 'sei/blefo'
+  ELM (hidden aleatório + solve):   96% (não-linear, ainda 1 solve)
+  escore do neurônio (alto=sei): Spain=+1.07 · Kenya=+1.05 · Brazil=+1.04 · Japan=+1.01 · Italy=+0.98 … Zubrowka=-0.02 · Qumar=-0.05 · Genovia=-0.11 · Wadiya=-0.14
+
+## VEREDITO
+  ✓ um NEURÔNIO CALCULADO (1 solve, 40 feats) separa 'sei' de 'blefo' a 100% — SÓ das ativações,
+    sem lista de vocabulário. A IARA pode abster pela PRÓPRIA incerteza do substrato (computado, não hardcoded).
+  Ancora ELM/readout fechado + Hopfield/Oja como órgãos CALCULÁVEIS (custo ~0, legíveis). wall 1.8min
+
+## WS PERCEPTRON + FÓRMULAS CALCULÁVEIS + VERIFICADOR CALCULADO (a família Rosenblatt p/ a IARA)
+Gatilho: post do Igor Venancio (perceptron à mão). Tese do Leonardo: se dá pra CALCULAR o neurônio (sem
+backprop/GPU), ajuda muito a IARA.
+1) ws_perceptron: reproduz o perceptron à mão — AND converge epoch 6 (=caderno do Igor), XOR NUNCA (trava
+   50%); composição OR∧NAND=XOR 100% = o multi-hop do grafo da IARA (AND de seletores). Regra w+=erro·x só
+   no erro = dopamina=RPE (valida os hormônios, de 1957).
+2) ws_neuron_formulas: 6 clássicos testados — Delta/LMS(AND 100%), READOUT FECHADO(ridge, 1 passo, 100%),
+   ELM(hidden aleatório+solve, XOR 100% SEM backprop), CENTROIDE(100%), OJA(|cos|0.96 com PC1 real),
+   HOPFIELD(3/3 recuperados de 25% ruído = água-recall calculada). Todos calculam o neurônio em 0-1 passo.
+3) ws_computed_verifier: em dados REAIS (15 países reais vs 12 fictícios), um READOUT FECHADO (40 feats das
+   ativações profundas, 1 solve) separa 'sei' vs 'blefo' a 100% LEAVE-ONE-OUT (ELM 96%), SEM lista de
+   vocabulário — a IARA pode abster pela própria incerteza do substrato (computado, não hardcoded). Amostra
+   pequena (n=27), mas prova forte. Órgãos calculáveis a plugar: ELM/readout fechado (roteador/verificador
+   não-linear instantâneo), Hopfield (água-recall), Oja/Sanger (eixo-conceito), centroide (triagem leve).

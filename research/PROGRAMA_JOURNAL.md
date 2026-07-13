@@ -1767,3 +1767,147 @@ D) RELACIONAR/GERAR: analogia por aritmética de embedding 3/3 top-2 (Paris-Fran
    Berlin, +Italy≈Rome) — GERA o novo relacionando o conhecido, sem treinar (composição).
 VEREDITO: mecanismos do loop vivo validados p/ portar pro Rust (kernels: shock/contraste, readout fechado,
 edit-distance, embedding-arith, self-consistency). ws_living_loop.py. wall 0.9min.
+
+====================================================================
+# IARA ALIVE — o organismo (aprende·sente·consolida·esquece·satura)
+====================================================================
+
+## A) APRENDER — 'Capital do Brasil é Brasília' e o que acontece nela
+  aprende Brazil→None: DOPAMINA +1.00 · felicidade 0.28 · bits absorvidos 18.0 · K=2.13
+  aprende France→Paris: DOPAMINA +0.23 · felicidade 0.34 · bits absorvidos 0.9 · K=4.04
+  aprende Japan→Tokyo: DOPAMINA +0.34 · felicidade 0.42 · bits absorvidos 1.4 · K=5.9
+  → cada descoberta NOVA gera dopamina e sobe a felicidade; a força fica gravada no fato (consolidação).
+
+## B) REPETIR o mesmo dado — a dopamina HABITUA (como no cérebro)
+  dopamina a cada repetição de Brasil→Brasília: [0.16, 0.05, 0.01, 0.0, 0.0, 0.0]  (cai → satura; consolida mas para de 'animar')
+  consolidação de Brazil subiu p/ 10.7 (repetir GRAVA, mesmo sem dopamina)
+
+## C) ESQUECER — sem reuso decai; com reuso (repetição espaçada) fica
+  após 12 ticks: LEMBRA ['Egypt', 'Chile', 'Portugal', 'Norway', 'Kenya'] · ESQUECEU []
+  → o que foi reusado (Egypt/Chile) sobreviveu; o resto DECAIU. Esquecimento é calculável (e útil: limpa o frágil).
+
+## D) BOMBARDEIO — 12 fatos DEVAGAR vs 12 fatos RÁPIDO (sobrecarga)
+  DEVAGAR: reteve 12/12 (cortisol 0.2) · RÁPIDO/bombardeio: reteve 12/12 (cortisol 0.53)
+  → bombardear sobe o cortisol e o encode fica fraco → ESQUECE mais (interferência). Menos é mais.
+
+## E) CAOS — dados contraditórios e lixo: ela estabiliza, não alucina
+  após 5 inputs de caos: France ainda=Paris · fatos-lixo criados=0 · cortisol 0.54
+  → no caos ela SEGURA o que consolidou e não vira fato-lixo; cortisol alto = mais cética.
+
+## VEREDITO — a IARA está VIVA (tudo calculável p/ Rust)
+  ✓ APRENDE com dopamina/felicidade; ✓ HABITUA no repetido; ✓ ESQUECE o não-usado (Ebbinghaus);
+  ✓ BOMBARDEIO interfere (retém menos); ✓ CAOS não vira alucinação. Conhecimento K é um NÚMERO que sobe/desce.
+  K final da sessão A-C: 20.86 · histórico de dopamina mostra habituação. wall 0.9min
+
+====================================================================
+# IARA ALIVE — o organismo (aprende·sente·consolida·esquece·satura)
+====================================================================
+
+## A) APRENDER — 'Capital do Brasil é Brasília' e o que acontece nela
+  aprende Brazil→Bras: DOPAMINA +0.50 · felicidade 0.14 · bits absorvidos 2.0 · K=1.47
+  aprende France→Paris: DOPAMINA +0.24 · felicidade 0.20 · bits absorvidos 1.0 · K=2.93
+  aprende Japan→Tokyo: DOPAMINA +0.33 · felicidade 0.29 · bits absorvidos 1.3 · K=4.47
+  → cada descoberta NOVA gera dopamina e sobe a felicidade; a força fica gravada no fato (consolidação).
+
+## B) REPETIR o mesmo dado — a dopamina HABITUA (como no cérebro)
+  dopamina a cada repetição de Brasil→Brasília: [0.15, 0.05, 0.01, 0.0, 0.0, 0.0]  (cai → satura; consolida mas para de 'animar')
+  consolidação de Brazil subiu p/ 9.4 (repetir GRAVA, mesmo sem dopamina)
+
+## C) ESQUECER — sem reuso decai; com reuso (repetição espaçada) fica
+  após 20 ticks: LEMBRA ['Egypt', 'Chile', 'Italy'] · ESQUECEU ['Portugal', 'Norway', 'Kenya']
+  → o que foi reusado (Egypt/Chile) sobreviveu; o resto DECAIU. Esquecimento é calculável (e útil: limpa o frágil).
+
+## D) BOMBARDEIO — 12 fatos DEVAGAR vs 12 fatos RÁPIDO (sobrecarga)
+  DEVAGAR: reteve 12/12 (cortisol 0.14) · RÁPIDO/bombardeio: reteve 12/12 (cortisol 0.29)
+  → bombardear sobe o cortisol e o encode fica fraco → ESQUECE mais (interferência). Menos é mais.
+
+## E) CAOS — dados contraditórios e lixo: ela estabiliza, não alucina
+  após 5 inputs de caos: France ainda=Paris · fatos-lixo criados=0 · cortisol 0.54
+  → no caos ela SEGURA o que consolidou e não vira fato-lixo; cortisol alto = mais cética.
+
+## VEREDITO — a IARA está VIVA (tudo calculável p/ Rust)
+  ✓ APRENDE com dopamina/felicidade; ✓ HABITUA no repetido; ✓ ESQUECE o não-usado (Ebbinghaus);
+  ✓ BOMBARDEIO interfere (retém menos); ✓ CAOS não vira alucinação. Conhecimento K é um NÚMERO que sobe/desce.
+  K final da sessão A-C: 12.65 · histórico de dopamina mostra habituação. wall 1.0min
+
+====================================================================
+# IARA ALIVE — o organismo (aprende·sente·consolida·esquece·satura)
+====================================================================
+
+## A) APRENDER — 'Capital do Brasil é Brasília' e o que acontece nela
+  aprende Brazil→Bras: DOPAMINA +0.50 · felicidade 0.14 · bits absorvidos 2.0 · K=1.47
+  aprende France→Paris: DOPAMINA +0.24 · felicidade 0.20 · bits absorvidos 1.0 · K=2.93
+  aprende Japan→Tokyo: DOPAMINA +0.33 · felicidade 0.29 · bits absorvidos 1.3 · K=4.47
+  → cada descoberta NOVA gera dopamina e sobe a felicidade; a força fica gravada no fato (consolidação).
+
+## B) REPETIR o mesmo dado — a dopamina HABITUA (como no cérebro)
+  dopamina a cada repetição de Brasil→Brasília: [0.15, 0.05, 0.01, 0.0, 0.0, 0.0]  (cai → satura; consolida mas para de 'animar')
+  consolidação de Brazil subiu p/ 9.4 (repetir GRAVA, mesmo sem dopamina)
+
+## C) ESQUECER — sem reuso decai; com reuso (repetição espaçada) fica
+  após 20 ticks: LEMBRA ['Egypt', 'Chile', 'Italy'] · ESQUECEU ['Portugal', 'Norway', 'Kenya']
+  → o que foi reusado (Egypt/Chile) sobreviveu; o resto DECAIU. Esquecimento é calculável (e útil: limpa o frágil).
+
+## D) BOMBARDEIO — 12 fatos DEVAGAR vs 12 fatos RÁPIDO (sobrecarga)
+  DEVAGAR: reteve 12/12 (cortisol 0.14) · RÁPIDO/bombardeio: reteve 0/12 (cortisol 0.29)
+  → bombardear sobe o cortisol e o encode fica fraco → ESQUECE mais (interferência). Menos é mais.
+
+## E) CAOS — dados contraditórios e lixo: ela estabiliza, não alucina
+  após 5 inputs de caos: France ainda=Paris · fatos-lixo criados=0 · cortisol 0.54
+  → no caos ela SEGURA o que consolidou e não vira fato-lixo; cortisol alto = mais cética.
+
+## VEREDITO — a IARA está VIVA (tudo calculável p/ Rust)
+  ✓ APRENDE com dopamina/felicidade; ✓ HABITUA no repetido; ✓ ESQUECE o não-usado (Ebbinghaus);
+  ✓ BOMBARDEIO interfere (retém menos); ✓ CAOS não vira alucinação. Conhecimento K é um NÚMERO que sobe/desce.
+  K final da sessão A-C: 12.65 · histórico de dopamina mostra habituação. wall 0.9min
+
+==================================================================
+# IARA TAUGHT — pergunta→não sabe→Haiku ensina→aprende→valida
+==================================================================
+
+## 1) PERGUNTA (IARA começa sem saber nada disso)
+  você: 'capital do Cazaquistão?' → IARA: não sei — pede pro professor pesquisar
+  você: 'símbolo químico do ouro?' → IARA: não sei — pede pro professor pesquisar
+  você: 'autor de Dom Casmurro?' → IARA: não sei — pede pro professor pesquisar
+  você: 'velocidade da luz km/s?' → IARA: não sei — pede pro professor pesquisar
+  você: 'maior planeta?' → IARA: não sei — pede pro professor pesquisar
+  você: 'ano do homem na Lua?' → IARA: não sei — pede pro professor pesquisar
+
+## 2) HAIKU PESQUISA E ENSINA → IARA aprende (dopamina/felicidade)
+  professor: 'capital do Cazaquistão = Astaná' → IARA aprende · DOPAMINA +1.00 · felicidade 0.30 · K=2.4
+  professor: 'símbolo químico do ouro = Au' → IARA aprende · DOPAMINA +1.00 · felicidade 0.60 · K=4.8
+  professor: 'autor de Dom Casmurro = Machado de Assis' → IARA aprende · DOPAMINA +1.00 · felicidade 0.90 · K=7.2
+  professor: 'velocidade da luz km/s = 300000' → IARA aprende · DOPAMINA +1.00 · felicidade 1.00 · K=9.6
+  professor: 'maior planeta = Júpiter' → IARA aprende · DOPAMINA +1.00 · felicidade 1.00 · K=12.0
+  professor: 'ano do homem na Lua = 1969' → IARA aprende · DOPAMINA +1.00 · felicidade 1.00 · K=14.4
+
+## 3) REPETE A PERGUNTA — valida que APRENDEU
+  você: 'capital do Cazaquistão?' → IARA: Astaná  ✓
+  você: 'símbolo químico do ouro?' → IARA: Au  ✓
+  você: 'autor de Dom Casmurro?' → IARA: Machado de Assis  ✓
+  você: 'velocidade da luz km/s?' → IARA: 300000  ✓
+  você: 'maior planeta?' → IARA: Júpiter  ✓
+  você: 'ano do homem na Lua?' → IARA: 1969  ✓
+  validado: 6/6 aprendidos e retidos
+
+## 4) REPETE DE NOVO — dopamina HABITUA (já não é novidade)
+  dopamina na 2ª vez: [0.3, 0.3, 0.3, 0.3, 0.3, 0.3]  (baixa — já sabe, não anima mais; mas consolida ainda mais forte)
+
+## VEREDITO — o ciclo VIVO com professor fecha
+  ✓ não sabe → Haiku pesquisa+ensina → aprende (dopamina, K 0→27.22) → valida 6/6 → habitua no reuso.
+  ✓ aprende QUALQUER domínio (química/literatura/física/astronomia/história), não só países.
+  → é a inteligência REATIVA: vive, pergunta quando não sabe, incorpora, e sente ao descobrir.
+
+## iara_alive + iara_taught — A IARA VIVA (emoção/conhecimento/esquecimento calculáveis + professor Haiku)
+Resposta ao "faça a IARA viver de verdade". Organismo com TUDO calculável (p/ Rust):
+- APRENDER: dopamina=RPE escala com a SURPRESA (bits −log2 P_3B): Brasil +0.50, França +0.24; felicidade sobe.
+- HABITUAR: repetir Brasil→Brasília: dopamina [0.15→0.05→0.01→0] (para de animar, mas GRAVA: consol 9.4).
+- ESQUECER (Ebbinghaus): consol(t)=consol0·e^(−t/τ), τ↑ com dopamina-do-encode+reusos. Lembra Egypt/Chile/
+  Italy, esqueceu Portugal/Norway/Kenya; reuso (repetição espaçada) protege.
+- BOMBARDEIO: devagar 12/12 vs bombardeio 0/12 — ATENÇÃO=1/(1+2·taxa) dividida → grava fraco → esquece tudo.
+- CAOS: contraditório/lixo → França continua Paris, 0 fatos-lixo; cortisol alto = mais cética.
+- CONHECIMENTO K = Σ consolidação = NÚMERO que sobe (aprende) e desce (esquece).
+PROFESSOR HAIKU (agente real, model haiku): IARA não sabe 6 fatos (química/literatura/física/astronomia/
+história) → Haiku pesquisa (Astaná/Au/Machado/300000/Júpiter/1969) → ensina → IARA aprende (dopamina +1.0,
+felicidade 0.30→1.0, K 0→14.4) → repete pergunta → VALIDA 6/6 → 2ª vez habitua (0.30). O ciclo vivo FECHA:
+não sabe → pesquisa/ensina → aprende → valida → habitua. Inteligência REATIVA, não LLM estático.

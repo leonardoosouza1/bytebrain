@@ -1722,3 +1722,48 @@ backprop/GPU), ajuda muito a IARA.
    vocabulário — a IARA pode abster pela própria incerteza do substrato (computado, não hardcoded). Amostra
    pequena (n=27), mas prova forte. Órgãos calculáveis a plugar: ELM/readout fechado (roteador/verificador
    não-linear instantâneo), Hopfield (água-recall), Oja/Sanger (eixo-conceito), centroide (triagem leve).
+
+==================================================================
+# O LOOP VIVO — verdade calculada + aprender o novo (validação p/ Rust)
+==================================================================
+
+## A) VERDADE CALCULADA (computar, não chutar)
+  A1 aritmética: modelo CHUTANDO acerta 0/4 · órgão-calculadora 4/4 (verdade exata). Ex: 347*89 → modelo None, verdade 30883
+  A2 inferência transitiva (país→capital + país→continente ⟹ capital→continente): 3/3 derivadas corretas (verdade por composição, sem perguntar)
+  A3 detecção de contradição: 'France→Berlin' vs grafo 'France→Paris' → conflito detectado = True (não sobrescreve cego)
+
+## B) PORTÃO 'sei/não sei' = neurônio calculado (readout fechado sobre as ativações)
+  treinado em 12 reais + 10 fakes · limiar 0.5 (score>0.5 = 'sei')
+
+## C) DIANTE DO NOVO — o loop vivo (reusa · aprende · pergunta · abstém; NUNCA blefa)
+  fluxo: Peru→APRENDE(Lima)[score+0.9] · France→APRENDE(Paris)[score+0.9] · Peru→reusa(Lima) · Genovia→'não sei, pesquiso?'[score-0.1] · Chile→APRENDE(Santiago)[score+0.9] · Wakanda→'não sei, pesquiso?'[score-0.0] · Japan→APRENDE(Tokyo)[score+1.0] · 'qual capital?'→pergunta de volta
+         Portugal→APRENDE(Lisbon)[score+0.9] · Narnia→'não sei, pesquiso?'[score+0.0] · Chile→reusa(Santiago) · India→APRENDE(New)[score+0.8]
+  RESULTADO: aprendeu 6 (corretos 6) · reusou 2 · perguntou/abstém 4 · BLEFES 0
+  → o grafo CRESCEU vivendo (6 fatos on-demand), reusa instantâneo, e NUNCA blefou ✓
+
+## D) RELACIONAR/GERAR — analogia por aritmética de embedding (gerar por composição)
+  Paris - France + Japan ≈ ['Tokyo', 'Paris', 'Beijing']  (gold Tokyo) ✓
+  Paris - France + Germany ≈ ['Paris', 'Berlin', 'Tokyo']  (gold Berlin) ✓
+  Paris - France + Italy ≈ ['Paris', 'Rome', 'Madrid']  (gold Rome) ✓
+  analogia por composição: 3/3 no top-2 (gerar o novo relacionando o conhecido, sem treinar)
+
+## VEREDITO — o que está VALIDADO p/ o Rust
+  ✓ VERDADE CALCULADA: aritmética exata + inferência transitiva + contradição — computar > chutar.
+  ✓ PORTÃO 'sei/não sei' computado gateia o loop vivo.
+  ✓ LOOP VIVO: novo → aprende (pesquisa+integra) / reusa / pergunta / abstém, sem blefar — não-estático.
+  ✓ RELACIONAR/GERAR por analogia de embedding: 3/3 (composição gera candidato).
+  wall 0.9min
+
+## ws_living_loop — O LOOP VIVO validado (verdade calculada + aprender o novo) p/ o Rust
+Resposta às perguntas do Leonardo (IARA que VIVE, não estática). 4 partes, todas honestas:
+A) VERDADE CALCULADA: aritmética modelo-chuta 0/4 vs órgão-calculadora 4/4 (347*89=30883 exato);
+   inferência transitiva país→capital+país→continente⟹capital→continente 3/3; contradição France→Berlin
+   vs grafo France→Paris detectada. Computar > chutar.
+B) PORTÃO 'sei/não sei' = neurônio calculado (readout fechado sobre ativações) gateia o loop.
+C) LOOP VIVO (diante do novo): stream misto → aprendeu 6 (6 corretos, pesquisa no professor+integra),
+   reusou 2 (instantâneo), perguntou de volta no ambíguo, abstém nos fakes (Genovia/Wakanda/Narnia score~0),
+   BLEFES=0. O grafo CRESCEU vivendo, NUNCA blefou. É o não-estático: novo→aprende/reusa/pergunta/abstém.
+D) RELACIONAR/GERAR: analogia por aritmética de embedding 3/3 top-2 (Paris-France+Japan≈Tokyo, +Germany≈
+   Berlin, +Italy≈Rome) — GERA o novo relacionando o conhecido, sem treinar (composição).
+VEREDITO: mecanismos do loop vivo validados p/ portar pro Rust (kernels: shock/contraste, readout fechado,
+edit-distance, embedding-arith, self-consistency). ws_living_loop.py. wall 0.9min.

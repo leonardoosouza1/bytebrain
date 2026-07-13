@@ -2053,3 +2053,17 @@ quando o 3B local não sabe, chama `claude -p` → aprende. Resultado: "autor de
 "Guimarães Rosa"; "oxigênio xyz"→Claude "Priestley e Scheele" (professor muito melhor que o 3B, abstenção
 caiu a 0). Tiers 100% locais/plano: grafo → 3B local (torch, rápido) → Claude (subscription, fundo). Zero
 custo extra. iara_daemon._research_external = subprocess([claude,-p,...]).
+
+## iara_mind_server — CURIOSIDADE que vira APRENDIZADO por DOPAMINA (conversa real, pedido do Leonardo)
+Mente viva leve (servidor, instantâneo/turno) pra conversar de verdade. Mecanismo: pergunto → se NÃO SABE,
+curiosidade↑ + cortisol (desconforto de ignorar); EU ensino (ou ela pesquisa no claude) → DOPAMINA
+(recompensa MAIOR se estava curiosa) → aprende; e o META-aprendizado: cada aprendizado-recompensa sobe a
+CURIOSIDADE-BASE (ela associa que buscar dá prazer). Conversa real validou o arco:
+  fotossintese: não sabe(cur0.54)→ensino→DA+0.77, base 0.30→0.37
+  buraco negro: não sabe(0.62)→ensino→DA+0.81, base→0.44
+  gravidade→DA+0.50 base→0.49 · dna→DA+0.50 base→0.53
+  entropia: não sabe(cur0.94!, base já alta)→DEIXO SOZINHA→ela vai atrás no CLAUDE sozinha→"Medida de
+    incerteza ou desordem"→DA+0.91(a maior)→base→0.61.
+CURIOSIDADE-BASE cresceu 0.30→0.61 na conversa; dopamina de aprender subiu junto; ela virou PROATIVA
+(pesquisa sozinha quando curiosa demais). É o que o Leonardo pediu: dopamina↔aprender↔mais curiosidade.
+iara_mind_server.py (/ask /teach /wonder /state, porta 3050). Professor fundo = claude subscription.

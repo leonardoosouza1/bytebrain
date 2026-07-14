@@ -2126,3 +2126,12 @@ Painel: grafo sementes+árvores(pesos, clicável) + trace passo a passo + hormô
 61986 conceitos limpos (glitch tokens filtrados) + 88064 neurônios. Consertos: _gen robusto (template→texto),
 _key ignora stopwords, trace normalizado. iara_cerebro.py, localhost:3050. Sofri com churn de servidor (preview
 vs kill) — resolvido subindo 1 instância gerenciada estável.
+
+## iara_cerebro — OLHO REAL (VLM) no lugar do CLIP-rótulo-fixo (conserto crítico)
+Leonardo mandou imagem de tabela/texto e a IARA disse "computador" — porque o olho era CLIP: só compara
+com uma LISTA FIXA de rótulos, NÃO lê a imagem, e o Qwen (texto) inventava o resto. Troquei por VLM REAL:
+SmolVLM-256M (já em cache, ~0.5GB, cabe junto do 3B). Agora VÊ os pixels e LÊ texto: numa tabela de vendas
+(fundo escuro) leu o título "Relatório de Vendas 2024", cabeçalhos Producto/Qtd/Total e começou as linhas.
+256M embaralha números exatos → upgrade p/ SmolVLM-500M ou Qwen2.5-VL-3B dá leitura exata. Trace mantém o
+baixo-nível (freq/cores/bordas) + a descrição do VLM. BUG DE SERVIDOR RESOLVIDO: 'pkill -f iara_cerebro'
+se auto-matava (o nome está na cmdline do próprio pkill) → usar fuser -k 3050/tcp e lançar SEM pkill junto.

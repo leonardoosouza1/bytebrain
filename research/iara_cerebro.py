@@ -17,7 +17,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 import numpy as np, torch
 from PIL import Image
-from transformers import AutoModelForCausalLM, AutoTokenizer, CLIPModel, CLIPProcessor
+from transformers import AutoModelForCausalLM, AutoTokenizer, AutoProcessor, AutoModelForImageTextToText
+VLM_ID="HuggingFaceTB/SmolVLM-256M-Instruct"
 HERE=os.path.dirname(os.path.abspath(__file__)); MODEL="/home/leonardo/projects/LLM/llm-lab/models/Qwen2.5-3B-Instruct"
 STATE=os.path.join(HERE,"iara_cerebro_state.json"); DEEP=8
 CLIP_VOCAB=["a dog","a cat","a person","a car","a building","a tower","a tree","a flower","a mountain","a beach",
@@ -64,8 +65,16 @@ class Cerebro:
         NL=m.config.num_hidden_layers;INT=m.config.intermediate_size;vals=[];s.idx=[]
         for L in range(NL-DEEP,NL): dp=m.model.layers[L].mlp.down_proj.weight.detach();vals.append((dp.t()*s.nw).contiguous());s.idx+=[(L,i) for i in range(INT)]
         s.vals=torch.cat(vals,0)
-        s.clip=CLIPModel.from_pretrained("openai/clip-vit-base-patch32").to("cuda").eval(); s.cproc=CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
-        s.ready=True; print(f"[cérebro ONLINE em {time.time()-t:.0f}s · {len(s.clean)} conceitos · {s.vals.shape[0]} neurônios]",flush=True)
+        s.vlmproc=AutoProcessor.from_pretrained(VLM_ID); s.vlm=AutoModelForImageTextToText.from_pretrained(VLM_ID,dtype=torch.float16).to("cuda").eval()
+        s.ready=True; print(f"[cérebro ONLINE em {time.time()-t:.0f}s · {len(s.clean)} conceitos · {s.vals.shape[0]} neurônios · olho VLM]",flush=True)
+    @torch.no_grad()
+    def _vlm(s,img,q):
+        msgs=[{"role":"user","content":[{"type":"image"},{"type":"text","text":q}]}]
+        p=s.vlmproc.apply_chat_template(msgs,add_generation_prompt=True)
+        inp=s.vlmproc(text=p,images=[img],return_tensors="pt").to("cuda")
+        out=s.vlm.generate(**inp,max_new_tokens=140,do_sample=False)
+        r=s.vlmproc.decode(out[0,inp.input_ids.shape[1]:],skip_special_tokens=True).strip()
+        return " ".join(r.split())[:400]
     # ---- persistência ----
     def _save_state(s):
         try: json.dump({"seeds":s.seeds,"dop":s.dop,"cur":s.cur},open(STATE,"w"),ensure_ascii=False)
@@ -112,11 +121,9 @@ class Cerebro:
         gr=np.asarray(img.convert("L").resize((256,256)),dtype=np.float32); F=np.fft.fftshift(np.fft.fft2(gr)); mag=np.abs(F)
         Y,X=np.ogrid[:256,:256]; r=np.sqrt((X-128)**2+(Y-128)**2); lo=float(mag[r<25].sum());mi=float(mag[(r>=25)&(r<80)].sum());hi=float(mag[r>=80].sum());tt=lo+mi+hi+1e-9
         T.append(("SENSORIAL","FREQUÊNCIAS (FFT)",f"baixa {lo/tt:.0%} (formas) · média {mi/tt:.0%} · alta {hi/tt:.0%} (textura)"))
-        inp=s.cproc(text=[f"a photo of {v}" for v in CLIP_VOCAB],images=img,return_tensors="pt",padding=True).to("cuda")
-        pr=s.clip(**inp).logits_per_image.softmax(-1)[0]; top=torch.topk(pr,3)
-        conc=[(CLIP_VOCAB[int(i)].replace("a photo of ","").replace("a ","").replace("an ","").replace("the ",""),float(p)) for p,i in zip(top.values,top.indices)]
-        T.append(("SENSORIAL","conceito (CLIP)"," · ".join(f"{c} {p:.0%}" for c,p in conc)))
-        return conc[0][0]
+        desc=s._vlm(img,"Look carefully and describe what this image shows. If there is any text, title, table or numbers, read them out loud in detail.")
+        T.append(("SENSORIAL","VLM — olha os pixels e lê",desc))
+        return desc
     # ---- córtex pré-frontal ----
     @torch.no_grad()
     def _gen(s,messages,n=64):
@@ -180,12 +187,11 @@ class Cerebro:
             lab=s._visao(p,T)
         except Exception as e:
             with s.lock: s.busy=False; return dict(say=f"não vi a imagem ({str(e)[:40]})")
-        T.append(("ROTEADOR","percepto visual → CÓRTEX"))
-        a=s._gen([{"role":"system","content":"Você é a IARA e está VENDO uma imagem. Em 1 frase, diga o que é e algo que sabe."},{"role":"user","content":f"Reconheci: {lab}. O que você vê?"}]).split("\n")[0].strip()
         with s.lock:
-            T.append(("CÓRTEX","interpretou",a)); c=s._key(lab) or lab.split()[-1]
-            s._seed(c,f"vi: {a}","visto"); T.append(("HIPOCAMPO","gravou SEMENTE (visão)",c)); s.dop=min(1,s.dop+0.5); T.append(("NEUROMOD","dopamina ↑ (novidade)",f"{s.dop:.2f}"))
-            s.chat.append(("iara","👁 "+a)); s._finish(T,t0,a,skipchat=True); return dict(say=a,concept=c)
+            T.append(("ROTEADOR","percepto visual pronto (VLM leu de verdade)"))
+            c=s._key(lab) or "imagem"; s._seed(c,f"vi: {lab}","visto")
+            T.append(("HIPOCAMPO","gravou SEMENTE (visão)",c)); s.dop=min(1,s.dop+0.5); T.append(("NEUROMOD","dopamina ↑ (viu algo novo)",f"{s.dop:.2f}"))
+            s.chat.append(("iara","👁 "+lab)); s._finish(T,t0,lab,skipchat=True); return dict(say=lab,concept=c)
     def _finish(s,T,t0,ans,skipchat=False):
         T.append(("—","tempo total",f"{(time.perf_counter()-t0)*1e3:.0f}ms"))
         s.trace=T;

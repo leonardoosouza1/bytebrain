@@ -132,7 +132,14 @@ class Cerebro:
         out=s.model.generate(ids,max_new_tokens=n,do_sample=False,pad_token_id=s.tok.eos_token_id)
         return s.tok.decode(out[0,ids.shape[1]:],skip_special_tokens=True).strip()
     def _reason(s,q,T):
-        facts=[v["stmt"] for k,v in s.seeds.items() if k in nrm(q) or any(w in nrm(q) for w in k.split() if len(w)>=4)][:6]
+        qn=nrm(q); qw=set(w for w in qn.split() if len(w)>=4 and w not in STOP_KEY)   # palavras de conteúdo da pergunta
+        scored=[]                                                       # RANKEIA por relevância (não ordem de inserção)
+        for k,v in s.seeds.items():
+            kw=set(w for w in nrm(k).split() if len(w)>=4)
+            sw=set(w for w in nrm(v["stmt"]).split() if len(w)>=4 and w not in STOP_KEY)
+            score=(2 if k in qn else 0)+2*len(qw & kw)+len(qw & sw)      # chave pesa mais que conteúdo
+            if score>0: scored.append((score,v["stmt"]))
+        scored.sort(key=lambda x:-x[0]); facts=[st for _,st in scored[:6]]
         if facts: T.append(("HIPOCAMPO","lê sementes relevantes"," · ".join(facts)))
         sysmsg="Você é a IARA. Responda em 1 frase curta. Use os fatos e o que sabe do mundo. Se não souber, diga 'não sei'."
         u=(("Você sabe:\n- "+"\n- ".join(facts)+"\n\n") if facts else "")+f"Pergunta: {q}"
@@ -159,9 +166,8 @@ class Cerebro:
                 s._seed(c,f"{c} é {a}","ensinado"); T.append(("HIPOCAMPO","gravou SEMENTE",f"{c} = {a}"))
                 s.dop=min(1,s.dop+0.4); T.append(("NEUROMOD","dopamina ↑ (aprendeu)",f"{s.dop:.2f}")); ans=f"Entendi! {c} é {a}."; s._finish(T,t0,ans); return dict(say=ans,concept=c)
             k=nrm(q)
-            for sk,sv in s.seeds.items():
-                if sk in k:
-                    T.append(("ROTEADOR","fato na memória → REFLEXO")); T.append(("REFLEXO","semente (rápido)",sv["stmt"])); s._finish(T,t0,sv["v"]); return dict(say=sv["v"],concept=s._key(sk))
+            if k in s.seeds:                                       # match EXATO do conceito → reflexo (rápido)
+                sv=s.seeds[k]; T.append(("ROTEADOR","conceito exato na memória → REFLEXO")); T.append(("REFLEXO","semente (rápido)",sv["stmt"])); s._finish(T,t0,sv["v"]); return dict(say=sv["v"],concept=s._key(k))
         # CÓRTEX (lento) — fora do lock
         if not s.ready:
             with s.lock: s.busy=False; s.chat.append(("iara","acordando os neurônios…")); return dict(say="acordando…")

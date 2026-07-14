@@ -136,23 +136,52 @@ class Cerebro:
         ins=s.proc(text=[txt],return_tensors="pt").to("cuda")
         out=s.model.generate(**ins,max_new_tokens=n,do_sample=False,pad_token_id=s.tok.eos_token_id)
         return s.proc.batch_decode(out[:,ins.input_ids.shape[1]:],skip_special_tokens=True)[0].strip()
+    def _gather(s,q,cap=10):                                            # RECUPERAÇÃO MULTI-HOP (espalhamento de ativação — tese-água)
+        qn=nrm(q); qw=set(w for w in qn.split() if len(w)>=4 and w not in STOP_KEY)
+        rare=lambda W:{w for w in W if w not in s.wmap}                  # termos distintivos do domínio (guiam o 2º salto)
+        ent={k:set(w for w in nrm(k+" "+v["stmt"]).split() if len(w)>=4 and w not in STOP_KEY) for k,v in s.seeds.items()}
+        chosen=[]; used=set(); hops=[]; frontier=qw
+        for hop in range(2):
+            scored=[]
+            for k,v in s.seeds.items():
+                if k in used: continue
+                e=ent[k]; sc=2*len(rare(frontier)&rare(e))+len(frontier&e)+(2 if k in qn else 0)
+                if sc>0: scored.append((sc,k,v["stmt"]))
+            scored.sort(key=lambda x:-x[0]); take=scored[:max(2,cap//2)]
+            for sc,k,st in take: chosen.append(st); used.add(k)
+            if take: hops.append((hop,[k for _,k,_ in take]))
+            frontier=set().union(*[rare(ent[k]) for _,k,_ in take[:2]]) if take else set()  # segue a PONTE (raros dos 2 melhores)
+            if len(chosen)>=cap or not frontier: break
+        return chosen[:cap],hops
     def _reason(s,q,T):
-        qn=nrm(q); qw=set(w for w in qn.split() if len(w)>=4 and w not in STOP_KEY)   # palavras de conteúdo da pergunta
-        scored=[]                                                       # RANKEIA por relevância (não ordem de inserção)
-        for k,v in s.seeds.items():
-            kw=set(w for w in nrm(k).split() if len(w)>=4)
-            sw=set(w for w in nrm(v["stmt"]).split() if len(w)>=4 and w not in STOP_KEY)
-            score=(2 if k in qn else 0)+2*len(qw & kw)+len(qw & sw)      # chave pesa mais que conteúdo
-            if score>0: scored.append((score,v["stmt"]))
-        scored.sort(key=lambda x:-x[0]); facts=[st for _,st in scored[:6]]
-        if facts: T.append(("HIPOCAMPO","lê sementes relevantes"," · ".join(facts)))
-        sysmsg="Você é a IARA. Responda em 1 frase curta. Use os fatos e o que sabe do mundo. Se não souber, diga 'não sei'."
-        u=(("Você sabe:\n- "+"\n- ".join(facts)+"\n\n") if facts else "")+f"Pergunta: {q}"
+        facts,hops=s._gather(q,cap=10)
+        for hop,ks in hops: T.append(("HIPOCAMPO",f"ativação hop {hop} → sementes",", ".join(ks)))
+        if facts:                                                       # ANCORA a resposta nos fatos (não inventa)
+            T.append(("HIPOCAMPO","lê contexto multi-hop"," · ".join(facts)))
+            sysmsg=("Você é a IARA, especialista. Use SOMENTE os fatos listados. Regras: "
+                    "(1) NÃO invente números, nomes ou detalhes que não estejam escritos nos fatos; "
+                    "(2) se a pergunta pedir algo que não está explícito nos fatos, responda exatamente 'não sei'; "
+                    "(3) você PODE encadear/combinar fatos, passo a passo, para deduzir a resposta. Responda em 1 frase curta.")
+            u="Fatos:\n- "+"\n- ".join(facts)+f"\n\nPergunta: {q}"
+        else:
+            sysmsg="Você é a IARA. Se souber com CERTEZA, responda em 1 frase curta; se tiver qualquer dúvida, responda exatamente 'não sei'."
+            u=f"Pergunta: {q}"
         a=s._gen([{"role":"system","content":sysmsg},{"role":"user","content":u}]).split("\n")[0].strip()
-        return None if (not a or "não sei" in a.lower() or nrm(a)=="nao sei") else a
+        if not a or "não sei" in a.lower() or nrm(a).startswith("nao sei"): return None
+        if facts:                                                       # VERIFICADOR: a resposta se sustenta nos fatos? (anti-confabulação)
+            chk=s._gen([{"role":"system","content":"Você verifica ancoragem. Responda só 'sim' ou 'não'."},
+                {"role":"user","content":"Fatos:\n- "+"\n- ".join(facts)+f"\n\nAfirmação: \"{a}\"\n\nTodo o conteúdo da afirmação (inclusive números e nomes) está escrito nos fatos ou é dedutível SÓ deles? Responda 'sim' ou 'não'."}],n=4)
+            T.append(("VERIFICADOR","ancoragem nos fatos",chk.strip()[:20]))
+            if chk.strip().lower().startswith(("n","não","nao")): return None  # não ancorada → abstém
+        return a
     def _seed(s,concept,stmt,kind):
         k=nrm(concept)
         if kind=="raciocinado" and s.seeds.get(k,{}).get("kind")=="ensinado": return  # não sobrescreve fato ensinado
+        ex=s.seeds.get(k)
+        if ex and ex.get("stmt")!=stmt and ex.get("kind")=="ensinado":  # MESMO conceito, FATO diferente → não perde: chave única
+            if kind=="ensinado":
+                base=k;i=2
+                while k in s.seeds: k=f"{base} {i}";i+=1
         s.seeds[k]={"v":stmt,"stmt":stmt,"kind":kind,"t":time.strftime("%H:%M")}; s._save_state()
     def _key(s,text):                                               # chave = SUJEITO da pergunta (não palavra da resposta)
         z=text.strip().rstrip("?.! ")
@@ -171,16 +200,17 @@ class Cerebro:
                 T.append(("ROTEADOR","é conta → REFLEXO (rápido)","")); T.append(("REFLEXO","matemática exata",f"{r[0]} = {r[1]}"))
                 s.dop=min(1,s.dop+0.15); ans=f"{r[0]} = {r[1]}"; s._finish(T,t0,ans); return dict(say=ans)
             qs=q.strip().rstrip("."); words=qs.split()
-            if "?" not in q:                                        # modo ENSINO: guarda fato (não só "X é Y")
-                st=re.match(r"^(.{2,70}?)\s+(?:é|eh|s[ãa]o|era|foi|significa)\s+(.{2,})$",qs,re.I)
-                c=stmt=None
-                if st: c=st.group(1).strip(); stmt=qs                # guarda a FRASE ORIGINAL (não força "é")
-                elif len(words)>=4 and qs[:1].isupper():             # frase declarativa (derrete, tem…) — chave = 1º nome próprio
-                    caps=re.findall(r"\b[A-ZÀ-Ý][A-Za-zÀ-ÿ]{2,}",qs); c=(caps[0] if caps else s._key(qs)) or words[0]; stmt=qs
-                if c and stmt:
-                    T.append(("ROTEADOR","é declaração → HIPOCAMPO")); s._seed(c,stmt,"ensinado")
-                    T.append(("HIPOCAMPO","gravou SEMENTE",stmt)); s.dop=min(1,s.dop+0.4)
-                    T.append(("NEUROMOD","dopamina ↑ (aprendeu)",f"{s.dop:.2f}")); ans=f"Entendi! {stmt}"; s._finish(T,t0,ans); return dict(say=ans,concept=c)
+            if "?" not in q and len(words)>=3:                      # modo ENSINO: chave = SUJEITO (antes do verbo), sem colidir
+                VERBO=r"(?:é|eh|s[ãa]o|era|foi|significa|fica|ficam|tem|t[êe]m|recebe|recebem|bombeia|leva|levam|traz|trazem|passa|passam|espalha|espalham|irriga|irrigam|enche|enchem|bate|batem|impede|impedem|envolve|derrete|conduz|vive|aparece)"
+                st=re.match(rf"^(.{{2,60}}?)\s+{VERBO}\b",qs,re.I); c=None
+                if st: c=st.group(1).strip()
+                elif qs[:1].isupper():
+                    caps=re.findall(r"\b[A-ZÀ-Ý][A-Za-zÀ-ÿ]{2,}",qs); c=(caps[0] if caps else s._key(qs)) or words[0]
+                if c:
+                    c=re.sub(r"^(?:o|a|os|as|um|uma)\s+","",c.strip(),flags=re.I) or c   # tira artigo → chave distintiva
+                    T.append(("ROTEADOR","é declaração → HIPOCAMPO")); s._seed(c,qs,"ensinado")
+                    T.append(("HIPOCAMPO","gravou SEMENTE",qs)); s.dop=min(1,s.dop+0.4)
+                    T.append(("NEUROMOD","dopamina ↑ (aprendeu)",f"{s.dop:.2f}")); ans=f"Entendi! {qs}"; s._finish(T,t0,ans); return dict(say=ans,concept=c)
             k=nrm(q)
             if k in s.seeds:                                       # match EXATO do conceito → reflexo (rápido)
                 sv=s.seeds[k]; T.append(("ROTEADOR","conceito exato na memória → REFLEXO")); T.append(("REFLEXO","semente (rápido)",sv["stmt"])); s._finish(T,t0,sv["v"]); return dict(say=sv["v"],concept=s._key(k))
@@ -351,6 +381,9 @@ class H(BaseHTTPRequestHandler):
         n=int(s.headers.get('Content-Length',0)); d=json.loads(s.rfile.read(n) or b"{}")
         if s.path=="/think": r=C.think(d.get("q",""))
         elif s.path=="/see": r=C.see(d.get("img",""))
+        elif s.path=="/raw":                                        # Qwen CRU (sem memória) — p/ comparar
+            a=C._gen([{"role":"system","content":"Responda em 1 frase curta e direta."},{"role":"user","content":d.get("q","")}]) if C.ready else "acordando…"
+            r=dict(say=a)
         else: r={"err":1}
         s._j(r)
 if __name__=="__main__":

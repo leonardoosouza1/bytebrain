@@ -25,6 +25,8 @@ WN={"zero":0,"um":1,"uma":1,"dois":2,"duas":2,"tres":3,"quatro":4,"cinco":5,"sei
 STOP_KEY={"qual","que","quem","onde","quando","como","porque","por","uma","para","com","dos","das","the","and","voce","isso","essa","esse","capital","cor","nome","the","this","that"}
 GAP_SKIP={"bombeia","recebe","fica","ficam","leva","levam","traz","trazem","passa","impede","impedem","envolve","conduz","derrete","espalha","espalham","irriga","irrigam","enche","enchem","bate","batem","chega","chegam","volta","voltam","aperta","empurra","saem","entra","acontece",
  "pobre","rico","forte","natural","proprio","propria","todo","toda","longe","dentro","cerca","mais","menos","primeiro","fora","depois","perto","grande","grandes","pequena","principal"}  # verbos/adjetivos: NÃO são conceitos-lacuna
+PRED=r"(?:é a liga de|é feito de|é feita de|são feitas de|são construídas de|é a|é o|é uma|é um|é|são|fica entre|ficam entre|fica no|fica na|fica|bombeia para|bombeia|leva para|leva|levam|traz para|traz|trazem|recebe|recebem|passa para|passa|espalha pelo|espalha|irriga|irrigam|enche de|enche|envolve|sai do|sai da|impede|bate|usa|controla|separa)"
+SKIP_OBJ={"mais","muito","cerca","vez","vezes","proprio","propria","todo","toda","primeiro","longe","dentro","fora","maior","menor","forte","natural","por","minuto","litros","graus","volta","sinal","lugar","modo","forma"}
 def strip_acc(s): return "".join(c for c in unicodedata.normalize("NFKD",s) if not unicodedata.combining(c))
 def nrm(s): return re.sub(r"[^a-z0-9 ]","",strip_acc(s).lower()).strip()
 def compute(q):
@@ -70,6 +72,7 @@ class Cerebro:
         NL=len(LM.layers);INT=LM.layers[0].mlp.down_proj.weight.shape[1];vals=[];s.idx=[]
         for L in range(NL-DEEP,NL): dp=LM.layers[L].mlp.down_proj.weight.detach();vals.append((dp.t()*s.nw).contiguous());s.idx+=[(L,i) for i in range(INT)]
         s.vals=torch.cat(vals,0)
+        s._fill_triples()                                          # extrai as conexões verdadeiras dos fatos já sabidos
         s.ready=True; print(f"[cérebro ONLINE em {time.time()-t:.0f}s · {len(s.clean)} conceitos · {s.vals.shape[0]} neurônios · Qwen2.5-VL-3B unificado]",flush=True)
     @torch.no_grad()
     def _vlm(s,img,q):
@@ -186,15 +189,20 @@ class Cerebro:
             for w in nrm(k+" "+v["stmt"]).split():
                 if len(w)>=5 and w not in STOP_KEY and w not in s.wmap: c[w]+=1
         return c.most_common(1)[0][0] if c else None
-    def _gaps(s):                                                      # FRONTEIRA: conceitos citados mas NÃO definidos (+ raros)
+    def _gaps(s):                                                      # FRONTEIRA: OBJETOS das triplas citados mas NÃO definidos
         from collections import Counter
-        subj=set()
-        for k in s.seeds: subj|=set(w for w in nrm(k).split() if len(w)>=4)
+        subj=set(k for k,v in s.seeds.items() if v.get("kind")!="raciocinado"); lb=lambda k:re.sub(r"\s+\d+$","",k)
+        def defined(o): return o in subj or any(o==lb(k) or (len(o.split())>=2 and o in k) for k in subj)
         ref=Counter()
-        for v in s.seeds.values():
+        for v in s.seeds.values():                                     # 1) objetos das triplas (lacuna PRECISA)
+            for o in (v.get("obj") or []):
+                if len(o)>=4 and o not in GAP_SKIP and not defined(o): ref[o]+=3
+        subjw=set();
+        for k in subj: subjw|=set(w for w in nrm(k).split() if len(w)>=4)
+        for v in s.seeds.values():                                     # 2) fallback: termos do domínio citados soltos
             for w in nrm(v["stmt"]).split():
-                if len(w)>=4 and w not in STOP_KEY and w not in GAP_SKIP and w not in subj: ref[w]+= (2 if w not in s.wmap else 1)  # termo do domínio pesa mais
-        return [w for w,_ in ref.most_common(12) if w not in subj]
+                if len(w)>=4 and w not in STOP_KEY and w not in GAP_SKIP and w not in subjw: ref[w]+= (2 if w not in s.wmap else 1)
+        return [w for w,_ in ref.most_common(12) if not defined(w)]
     def _professor(s,concept,domain):                                  # Claude via SUBSCRIPTION (claude -p) = professor externo
         import subprocess
         ctx="; ".join([v["stmt"] for v in list(s.seeds.values())[-6:]])
@@ -226,6 +234,28 @@ class Cerebro:
             for _ in range(max(5,int(s.auto_every))):
                 time.sleep(1)
                 if not getattr(s,"auto",False): break
+    def _triple(s,stmt):                                            # extrai (relação, [objetos]) da frase → CONEXÃO VERDADEIRA
+        z=re.sub(r"\s+"," ",stmt.strip().rstrip("."))
+        m=re.match(rf"^(.{{1,55}}?)\s+({PRED})\s+(.+)$",z,re.I)
+        if not m: return "",[]
+        rel=re.sub(r"\s+(o|a|os|as)$","",m.group(2).lower().strip()); rest=m.group(3); objs=[]
+        for part in re.split(r"\s+e\s+|,\s*|:\s*",rest):
+            part=re.split(r"\s+que\s+",part)[0]                     # corta a subordinada ("...que volta do corpo")
+            for chunk in re.split(r"\s+(?:para|de|do|da|no|na|ao|aos|à|às|em|pelo|pela|onde|conhecid\w*)\s+",part):
+                c=re.sub(r"^(o|a|os|as|um|uma)\s+","",chunk.strip(),flags=re.I).strip()
+                toks=[w for w in c.split() if len(w)>2 and nrm(w) not in SKIP_OBJ and not w.isdigit()]
+                if toks and nrm(toks[0]) not in GAP_SKIP: objs.append(" ".join(toks[:2]))  # não começa com verbo/adjetivo
+        seen=[]
+        for o in objs:
+            n=nrm(o)
+            if len(n)>2 and n not in seen: seen.append(n)
+        return rel,seen[:4]
+    def _fill_triples(s):                                           # completa triplas faltantes (1x, persiste)
+        ch=False
+        for k,v in s.seeds.items():
+            if "rel" not in v and v.get("kind")!="raciocinado":
+                v["rel"],v["obj"]=s._triple(v["stmt"]); ch=True
+        if ch: s._save_state()
     def _seed(s,concept,stmt,kind):
         k=nrm(concept)
         if kind=="raciocinado" and s.seeds.get(k,{}).get("kind")=="ensinado": return  # não sobrescreve fato ensinado
@@ -234,7 +264,8 @@ class Cerebro:
             if kind=="ensinado":
                 base=k;i=2
                 while k in s.seeds: k=f"{base} {i}";i+=1
-        s.seeds[k]={"v":stmt,"stmt":stmt,"kind":kind,"t":time.strftime("%H:%M")}; s._save_state()
+        rel,obj=s._triple(stmt)                                     # conexões verdadeiras (sujeito→relação→objetos)
+        s.seeds[k]={"v":stmt,"stmt":stmt,"kind":kind,"t":time.strftime("%H:%M"),"rel":rel,"obj":obj}; s._save_state()
     def _key(s,text):                                               # chave = SUJEITO da pergunta (não palavra da resposta)
         z=text.strip().rstrip("?.! ")
         m=re.search(r"(?:o que (?:é|eh|são|sao)|quem (?:criou|inventou|é|foi|era)|qual(?: é| eh)?(?: a| o| as| os)?|onde (?:é|fica|foi)|quando (?:é|foi))\s+(?:a |o |as |os |da |do |de )?(.+)$",z,re.I)
@@ -354,7 +385,7 @@ class Cerebro:
             sf=Counter()                                            # SUB-ÁREAS = raiz do sujeito compartilhada por ≥2 fatos (micro)
             for m in members:
                 for e in subj[m]: sf[e]+=1
-            subhubs=set()
+            subhubs=set(); MEMB={"dashes":True,"color":{"color":"#232a3a"},"font":{"size":0}}  # arestas de ESTRUTURA (sem rótulo)
             for m in members:
                 nodes[m]=dict(id=m,label=lbl(m),group=KG.get(sd[m]["kind"],"seed"),fact=sd[m]["stmt"],title=sd[m]["stmt"])
                 opts=[(sf[e],len(e),e) for e in subj[m] if sf[e]>=2]
@@ -362,15 +393,55 @@ class Cerebro:
                 if area:
                     sh="▸"+area
                     if sh not in subhubs:
-                        subhubs.add(sh); nodes[sh]=dict(id=sh,label=area.upper(),group="subarea"); edges.append({"from":tid,"to":sh,"label":""})
-                    edges.append({"from":sh,"to":m,"label":s._rel_type(sd[m]["stmt"],topic)})
+                        subhubs.add(sh); nodes[sh]=dict(id=sh,label=area.upper(),group="subarea"); edges.append({"from":tid,"to":sh,"label":"",**MEMB})
+                    edges.append({"from":sh,"to":m,"label":"",**MEMB})
                 else:
-                    edges.append({"from":tid,"to":m,"label":s._rel_type(sd[m]["stmt"],topic)})
+                    edges.append({"from":tid,"to":m,"label":"",**MEMB})
+        # ---- CONEXÕES VERDADEIRAS: triplas sujeito—relação→objeto; objeto não-definido = LACUNA (vermelho) ----
+        skeys=[k for k,_ in seeds]
+        def match(o):
+            if o in skeys: return o
+            for k in skeys:
+                if o==lbl(k) or (len(o.split())>=2 and o in k): return k   # exato, ou frase (não single-word substring)
+            return None
+        for k,v in seeds:
+            rel=v.get("rel") or "→"
+            for o in (v.get("obj") or [])[:3]:
+                tgt=match(o)
+                if tgt and tgt!=k:
+                    edges.append({"from":k,"to":tgt,"label":rel,"color":{"color":"#2f7f6e","highlight":"#5dcaa5"},"width":1.4})
+                elif not tgt and len(o)>=4:
+                    gid="?"+o
+                    if gid not in nodes: nodes[gid]=dict(id=gid,label=o,group="gap",title="citado mas ainda NÃO definido (lacuna)")
+                    edges.append({"from":k,"to":gid,"label":rel,"color":{"color":"#7a3550","highlight":"#e24b4a"},"width":1.2})
         return dict(nodes=list(nodes.values()),edges=edges)
+    def _vitals(s):                                                 # SINAIS VITAIS do conhecimento
+        facts={k:v for k,v in s.seeds.items() if v.get("kind")!="raciocinado"}
+        subj=set(facts); lb=lambda k:re.sub(r"\s+\d+$","",k)
+        def hit(o): return next((kk for kk in subj if o==kk or o==lb(kk) or (len(o.split())>=2 and o in kk)),None)
+        def match(o): return hit(o) is not None
+        refs=[]; adj={}
+        for k,v in facts.items():
+            outs=[]
+            for o in (v.get("obj") or []):
+                if len(o)>=4: refs.append(o)
+                m=hit(o)
+                if m and m!=k: outs.append(m)
+            adj[k]=outs
+        refs=set(refs); defined=[o for o in refs if match(o)]
+        seen={}
+        def depth(n,path):
+            if n in path: return 0
+            if n in seen: return seen[n]
+            d=1+max([depth(m,path|{n}) for m in adj.get(n,[])]+[0]); seen[n]=d; return d
+        prof=max([depth(k,set()) for k in adj]+[0])
+        return dict(fatos=len(facts),ligacoes=sum(len(v.get("obj") or []) for v in facts.values()),
+            conceitos=len(refs),definidos=len(defined),completude=round(100*len(defined)/max(1,len(refs))),
+            profundidade=prof,lacunas=[o for o in refs if o not in defined][:10])
     def state(s):
         return dict(ready=s.ready,busy=s.busy,conceitos=len(getattr(s,'clean',[])) if s.ready else 0,neuronios=int(getattr(s,'vals',torch.zeros(0)).shape[0]) if s.ready else 0,
             chat=s.chat[-12:],trace=[list(t)+[""]*(3-len(t)) for t in s.trace],dop=round(s.dop,2),cort=round(s.cort,2),cur=round(s.cur,2),
-            auto=s.auto,auto_every=s.auto_every,gap_now=s.gap_now,nfatos=len(s.seeds),autofeed=s.autofeed[-8:],
+            auto=s.auto,auto_every=s.auto_every,gap_now=s.gap_now,nfatos=len(s.seeds),autofeed=s.autofeed[-8:],vitais=s._vitals() if s.ready else None,
             sementes=[dict(c=k,s=v["v"],k=v["kind"],t=v.get("t","")) for k,v in list(s.seeds.items())[-12:]])
 
 C=Cerebro()
@@ -401,9 +472,14 @@ button{background:#12251d;border:1px solid #1d9e75;color:#9fe1cb;padding:8px 10p
 .af{font-size:11px;line-height:1.35;margin:4px 0;border-left:2px solid #1d9e75;padding-left:6px;color:#cfe}.af b{color:#9fe1cb}.af .g{color:#ef9f27}
 #det{font-size:12px;line-height:1.45;color:#cfe}#det .k{color:#9fe1cb;font-weight:700}#det .rel{color:#93a6c4}
 .pill{display:inline-block;font-size:9px;padding:1px 6px;border-radius:8px;background:#12251d;border:1px solid #1d9e75;color:#9fe1cb;margin:1px}
+.vg{display:flex;gap:6px;text-align:center}.vg .b{flex:1;background:#12151d;border:1px solid #1e2330;border-radius:6px;padding:5px 2px}.vg .n{font-size:18px;font-weight:700;color:#9fe1cb}.vg .l{font-size:8.5px;color:#7a8290}
+.compbar{height:8px;background:#171b24;border-radius:4px;margin-top:6px;overflow:hidden}.compbar>i{display:block;height:100%;background:linear-gradient(90deg,#e24b4a,#ef9f27,#5dcaa5)}
+#leg{position:fixed;bottom:8px;left:340px;font-size:10px;color:#9ab;background:#0d1016cc;border:1px solid #1e2330;border-radius:6px;padding:5px 8px;z-index:8}
+#leg b{font-weight:400}.lz{display:inline-block;width:16px;height:0;border-top:2px solid;vertical-align:middle;margin-right:3px}
 </style></head><body>
 <div id=bar><h1>◉ IARA · CÉREBRO</h1><span id=stt>acordando…</span><span style=flex:1></span><span id=fatos style="color:#ba7517;font-size:11px"></span></div>
 <div id=L>
+ <div class=card><h2>sinais vitais do conhecimento</h2><div id=vitais></div></div>
  <div class=card><h2>aprendizado autônomo (professor Claude)</h2>
    <div id=auto><div class=sw id=sw onclick=toggleAuto()><i></i></div><span>modo automático — ela estuda o que menos sabe</span></div>
    <div class=gap id=gap></div>
@@ -415,6 +491,7 @@ button{background:#12251d;border:1px solid #1d9e75;color:#9fe1cb;padding:8px 10p
  <div id=ci><input id=qi placeholder="fale, ensine ('X é Y') ou pergunte…" onkeydown="if(event.key=='Enter')ask()"><button onclick=ask()>enviar</button></div>
 </div>
 <div id=net></div>
+<div id=leg><span class=lz style=border-color:#2f7f6e></span><b>relação verdadeira</b> &nbsp; <span class=lz style="border-color:#7a3550"></span><b>lacuna (não sabe)</b> &nbsp; <span class=lz style="border-color:#232a3a;border-top-style:dashed"></span><b>estrutura</b></div>
 <div id=R>
  <div class=card style=border:0><h2>nó selecionado (clique no grafo)</h2><div id=det><span style=color:#666>clique num nó pra ver o fato e as relações</span></div></div>
  <div class=card style=border:0><h2>professor ↔ aluna (o que ela aprendeu sozinha)</h2><div id=feed></div></div>
@@ -426,7 +503,8 @@ const opt={nodes:{shape:'dot',size:13,font:{color:'#dfe6f0',size:12,face:'monosp
  edges:{color:{color:'#33405c',highlight:'#5b8fd6'},smooth:{type:'continuous'},width:.8,arrows:{to:{enabled:true,scaleFactor:.4}},font:{color:'#93a6c4',size:9,face:'monospace',strokeWidth:3,strokeColor:'#090b10',align:'middle'}},
  groups:{topic:{shape:'hexagon',color:{background:'#20344f',border:'#5b8fd6'},size:30,font:{size:16,color:'#bcd8ff'},borderWidth:3},
   subarea:{shape:'diamond',color:{background:'#2a2340',border:'#8f7fd6'},size:17,font:{size:12,color:'#cbb8ff'},borderWidth:2},
-  seed:{color:{background:'#ba7517',border:'#ef9f27'}},auto:{color:{background:'#0f6e56',border:'#5dcaa5'}},vision:{color:{background:'#0f6e56',border:'#1d9e75'}},reason:{color:{background:'#3c3489',border:'#7f77dd'}},tree:{color:{background:'#1b2130',border:'#2a3550'},size:9}},
+  seed:{color:{background:'#ba7517',border:'#ef9f27'}},auto:{color:{background:'#0f6e56',border:'#5dcaa5'}},vision:{color:{background:'#0f6e56',border:'#1d9e75'}},reason:{color:{background:'#3c3489',border:'#7f77dd'}},
+  gap:{shape:'dot',size:8,color:{background:'#3a2030',border:'#e24b4a'},font:{color:'#d98a94',size:10}},tree:{color:{background:'#1b2130',border:'#2a3550'},size:9}},
  physics:{barnesHut:{gravitationalConstant:-14000,springLength:120,springConstant:.03,centralGravity:.25,avoidOverlap:.3},stabilization:{iterations:150}},interaction:{hover:true,tooltipDelay:120}};
 async function Po(u,b){return (await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})).json()}
 async function ask(){const v=qi.value.trim();if(!v)return;qi.value='';await Po('/think',{q:v});poll()}
@@ -456,6 +534,7 @@ function render(st){document.getElementById('stt').textContent=st.busy?'🧠 pen
  autoOn=!!st.auto;document.getElementById('sw').className='sw'+(autoOn?' on':'');
  document.getElementById('gap').innerHTML=st.gap_now?`🔎 estudando agora: <b>${st.gap_now}</b> — perguntando ao professor…`:(autoOn?'observando o grafo pelo que menos conhece…':'desligado');
  horm.innerHTML=[['dopamina',st.dop,'#63c923'],['cortisol',st.cort,'#e24b4a'],['curiosidade',st.cur,'#ef9f27']].map(([n,v,c])=>`<div class=h><span>${n}</span><span>${v}</span></div><div class=tk><div class=tf style="width:${v*100}%;background:${c}"></div></div>`).join('');
+ const vi=st.vitais;if(vi){document.getElementById('vitais').innerHTML=`<div class=vg><div class=b><div class=n>${vi.fatos}</div><div class=l>fatos</div></div><div class=b><div class=n>${vi.ligacoes}</div><div class=l>conexões</div></div><div class=b><div class=n>${vi.profundidade}</div><div class=l>saltos</div></div><div class=b><div class=n style=color:#ef9f27>${vi.completude}%</div><div class=l>completude</div></div></div><div class=compbar><i style=width:${vi.completude}%></i></div><div style="font-size:10px;color:#7a8290;margin-top:5px">sabe definir <b style=color:#9fe1cb>${vi.definidos}</b> de ${vi.conceitos} conceitos que cita · lacunas: <span style=color:#d98a94>${(vi.lacunas||[]).slice(0,5).join(', ')||'—'}</span></div>`;}
  feed.innerHTML=(st.autofeed||[]).slice().reverse().map(a=>`<div class=af><span style=color:#7a8290>${a.t}</span> não sabia <span class=g>${a.gap}</span><br><b>professor:</b> ${a.fact}</div>`).join('')||'<span style=color:#666>ligue o modo automático e ela vai estudar sozinha</span>';
  chat.innerHTML=(st.chat||[]).map(m=>`<div class="m ${m[0]}">${m[0]=='voce'?'você: ':'IARA: '}${m[1]}</div>`).join('');chat.scrollTop=chat.scrollHeight;
  trace.innerHTML=(st.trace||[]).map(t=>`<div class="tr r-${t[0]}"><b>${t[0]}</b> · ${t[1]}${t[2]?` <span class=d>${t[2]}</span>`:''}</div>`).join('')||'<span style=color:#666>mande uma mensagem…</span>';

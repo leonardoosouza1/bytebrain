@@ -2105,3 +2105,11 @@ ASSOCIA); neurônios-que-escrevem-X = down_proj·E[x] topk (logit-lens, como WS2
 value·E^T topk. Testado no navegador: clicar 'France' expande (French/Germany/Paris/Spain/Italy) + painel
 mostra os neurônios (L33·n5568 escreve French/France…) + chips clicáveis. 'brain'→cerebral/neuroscience.
 Interação confirmada por eval (48→51 nós ao clicar, 8 neurônios no painel). iara_weights.py, porta 3050.
+
+## iara_visao — CÓRTEX VISUAL rastreável (1º órgão da PoC do cérebro anatômico)
+Reorientação (o Leonardo pediu cérebro anatômico + rastreabilidade). Órgão-olho detalhado passo a passo:
+sinal cru (res/brilho/contraste) → cores dominantes (histograma) → bordas (densidade de gradiente) →
+FREQUÊNCIAS (FFT 2D radial: baixa/média/alta = liso vs textura, liga no Resonance Forest) → conceito (CLIP).
+Testado: Eiffel (baixa20/média38/alta42%, Eiffel 97%), cachorro (bordas 0.063 muita estrutura, dog 81%).
+Cada passo = entrada de TRACE (pra achar bug). Próximo: montar o cérebro anatômico (reflexo rápido +
+córtex Qwen lento + hipocampo/memória sementes+árvores + neuromodulação + verificador) trace-first, num só.

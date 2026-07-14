@@ -24,7 +24,7 @@ STATE=os.path.join(HERE,"iara_cerebro_state.json"); DEEP=8
 WN={"zero":0,"um":1,"uma":1,"dois":2,"duas":2,"tres":3,"quatro":4,"cinco":5,"seis":6,"sete":7,"oito":8,"nove":9,"dez":10,"cem":100,"mil":1000}
 STOP_KEY={"qual","que","quem","onde","quando","como","porque","por","uma","para","com","dos","das","the","and","voce","isso","essa","esse","capital","cor","nome","the","this","that"}
 GAP_SKIP={"bombeia","recebe","fica","ficam","leva","levam","traz","trazem","passa","impede","impedem","envolve","conduz","derrete","espalha","espalham","irriga","irrigam","enche","enchem","bate","batem","chega","chegam","volta","voltam","aperta","empurra","saem","entra","acontece",
- "pobre","rico","forte","natural","proprio","propria","todo","toda","longe","dentro","cerca","mais","menos","primeiro","fora","depois","perto","grande","grandes","pequena","principal"}  # verbos/adjetivos: NÃO são conceitos-lacuna
+ "pobre","rico","forte","natural","proprio","propria","todo","toda","longe","dentro","cerca","mais","menos","primeiro","fora","depois","perto","grande","grandes","pequena","principal","enquanto","quando","porque","assim","entao"}  # verbos/adjetivos/conectivos: NÃO são conceitos-lacuna
 PRED=r"(?:é a liga de|é feito de|é feita de|são feitas de|são construídas de|é a|é o|é uma|é um|é|são|fica entre|ficam entre|fica no|fica na|fica|bombeia para|bombeia|leva para|leva|levam|traz para|traz|trazem|recebe|recebem|passa para|passa|espalha pelo|espalha|irriga|irrigam|enche de|enche|envolve|sai do|sai da|impede|bate|usa|controla|separa)"
 SKIP_OBJ={"mais","muito","cerca","vez","vezes","proprio","propria","todo","toda","primeiro","longe","dentro","fora","maior","menor","forte","natural","por","minuto","litros","graus","volta","sinal","lugar","modo","forma"}
 def strip_acc(s): return "".join(c for c in unicodedata.normalize("NFKD",s) if not unicodedata.combining(c))
@@ -45,6 +45,18 @@ def compute(q):
             r=a+b if op=="+" else a-b if op=="-" else a*b if op=="*" else (a/b if b else float('nan')) if op=="/" else a**b
             return (f"{m.group(1)} {op} {m.group(3)}",int(r) if r==int(r) else round(r,4))
         except Exception: return None
+    return None
+def digit_reflex(q):                                            # organ calculável (descoberta do Leonardo): raiz digital / atrator
+    x=strip_acc(q).lower()
+    m=re.search(r"raiz digital (?:de |do |da )?(\d+)",x)
+    if m:
+        n=int(m.group(1)); return (f"raiz digital de {n}", 1+(n-1)%9 if n else 0)
+    m=re.search(r"(?:atrator|classe|para onde vai|orbita) (?:de |do |da )?(\d+)",x)
+    if m:
+        n=int(m.group(1)); seen=[]; v=n
+        while v not in seen and len(seen)<20: seen.append(v); v=sum(int(c) for c in str(v*v))
+        cyc=seen[seen.index(v):] if v in seen else [v]
+        return (f"órbita de {n} (n→soma dos dígitos de n²)", " → ".join(map(str,seen[:6]))+f"  ⟳ atrator {sorted(set(cyc))}")
     return None
 
 class Cerebro:
@@ -189,20 +201,23 @@ class Cerebro:
             for w in nrm(k+" "+v["stmt"]).split():
                 if len(w)>=5 and w not in STOP_KEY and w not in s.wmap: c[w]+=1
         return c.most_common(1)[0][0] if c else None
-    def _gaps(s):                                                      # FRONTEIRA: OBJETOS das triplas citados mas NÃO definidos
-        from collections import Counter
+    def _gaps(s):                                                      # FRONTEIRA guiada por CENTRALIDADE (a lacuna que mais sustenta o grafo)
+        from collections import defaultdict
         subj=set(k for k,v in s.seeds.items() if v.get("kind")!="raciocinado"); lb=lambda k:re.sub(r"\s+\d+$","",k)
         def defined(o): return o in subj or any(o==lb(k) or (len(o.split())>=2 and o in k) for k in subj)
-        ref=Counter()
-        for v in s.seeds.values():                                     # 1) objetos das triplas (lacuna PRECISA)
+        refby=defaultdict(set)                                          # centralidade barata = nº de FATOS distintos que citam a lacuna
+        for k,v in s.seeds.items():
+            if v.get("kind")=="raciocinado": continue
             for o in (v.get("obj") or []):
-                if len(o)>=4 and o not in GAP_SKIP and not defined(o): ref[o]+=3
-        subjw=set();
+                if len(o)>=4 and o not in GAP_SKIP and not defined(o): refby[o].add(k)
+        score={o:len(f)*3 for o,f in refby.items()}
+        subjw=set()
         for k in subj: subjw|=set(w for w in nrm(k).split() if len(w)>=4)
-        for v in s.seeds.values():                                     # 2) fallback: termos do domínio citados soltos
+        for v in s.seeds.values():                                     # fallback: termos do domínio citados soltos
             for w in nrm(v["stmt"]).split():
-                if len(w)>=4 and w not in STOP_KEY and w not in GAP_SKIP and w not in subjw: ref[w]+= (2 if w not in s.wmap else 1)
-        return [w for w,_ in ref.most_common(12) if not defined(w)]
+                if len(w)>=4 and w not in STOP_KEY and w not in GAP_SKIP and w not in subjw and not defined(w):
+                    score[w]=score.get(w,0)+(2 if w not in s.wmap else 1)
+        return [w for w,_ in sorted(score.items(),key=lambda x:(-x[1],x[0]))][:12]
     def _professor(s,concept,domain):                                  # Claude via SUBSCRIPTION (claude -p) = professor externo
         import subprocess
         ctx="; ".join([v["stmt"] for v in list(s.seeds.values())[-6:]])
@@ -278,6 +293,10 @@ class Cerebro:
         with s.lock:
             s.busy=True; s.chat.append(("voce",q)); T=[("SENSORIAL","recebeu texto",q)]; t0=time.perf_counter()
             # ROTEADOR + REFLEXO
+            dg=digit_reflex(q)                                      # organ calculável (raiz digital / atrator — 0 param) — ANTES da conta
+            if dg:
+                T.append(("ROTEADOR","é invariante → REFLEXO calculável","")); T.append(("REFLEXO","raiz digital / atrator",f"{dg[0]} = {dg[1]}"))
+                s.dop=min(1,s.dop+0.1); ans=f"{dg[0]} = {dg[1]}"; s._finish(T,t0,ans); return dict(say=ans)
             r=compute(q)
             if r:
                 T.append(("ROTEADOR","é conta → REFLEXO (rápido)","")); T.append(("REFLEXO","matemática exata",f"{r[0]} = {r[1]}"))
@@ -435,9 +454,27 @@ class Cerebro:
             if n in seen: return seen[n]
             d=1+max([depth(m,path|{n}) for m in adj.get(n,[])]+[0]); seen[n]=d; return d
         prof=max([depth(k,set()) for k in adj]+[0])
+        # ---- ESTRUTURA (bateria matemática): ilhas, pontes, densidade ----
+        ilhas=pontes=0; frageis=[]
+        try:
+            import networkx as nx
+            UG=nx.Graph()
+            for k in facts: UG.add_node(k)
+            for k,outs in adj.items():
+                for m in outs: UG.add_edge(k,m)
+            comps=list(nx.connected_components(UG))
+            ilhas=sum(1 for c in comps if len(c)==1)
+            art=list(nx.articulation_points(UG)) if UG.number_of_nodes()>2 else []
+            pontes=len(art); frageis=[lb(a) for a in art[:5]]
+        except Exception: pass
+        import gzip
+        blob="\n".join(v["stmt"] for v in facts.values()).encode()
+        dens=round(len(gzip.compress(blob))*8/max(1,len(facts)))          # bits por fato (densidade)
+        comp=round(len(blob)/max(1,len(gzip.compress(blob))),2)           # razão de compressão (estrutura/redundância)
         return dict(fatos=len(facts),ligacoes=sum(len(v.get("obj") or []) for v in facts.values()),
             conceitos=len(refs),definidos=len(defined),completude=round(100*len(defined)/max(1,len(refs))),
-            profundidade=prof,lacunas=[o for o in refs if o not in defined][:10])
+            profundidade=prof,ilhas=ilhas,pontes=pontes,frageis=frageis,bitsfato=dens,compressao=comp,
+            lacunas=s._gaps()[:8])                                       # centralidade: a lacuna mais 'load-bearing' primeiro
     def state(s):
         return dict(ready=s.ready,busy=s.busy,conceitos=len(getattr(s,'clean',[])) if s.ready else 0,neuronios=int(getattr(s,'vals',torch.zeros(0)).shape[0]) if s.ready else 0,
             chat=s.chat[-12:],trace=[list(t)+[""]*(3-len(t)) for t in s.trace],dop=round(s.dop,2),cort=round(s.cort,2),cur=round(s.cur,2),
@@ -534,7 +571,7 @@ function render(st){document.getElementById('stt').textContent=st.busy?'🧠 pen
  autoOn=!!st.auto;document.getElementById('sw').className='sw'+(autoOn?' on':'');
  document.getElementById('gap').innerHTML=st.gap_now?`🔎 estudando agora: <b>${st.gap_now}</b> — perguntando ao professor…`:(autoOn?'observando o grafo pelo que menos conhece…':'desligado');
  horm.innerHTML=[['dopamina',st.dop,'#63c923'],['cortisol',st.cort,'#e24b4a'],['curiosidade',st.cur,'#ef9f27']].map(([n,v,c])=>`<div class=h><span>${n}</span><span>${v}</span></div><div class=tk><div class=tf style="width:${v*100}%;background:${c}"></div></div>`).join('');
- const vi=st.vitais;if(vi){document.getElementById('vitais').innerHTML=`<div class=vg><div class=b><div class=n>${vi.fatos}</div><div class=l>fatos</div></div><div class=b><div class=n>${vi.ligacoes}</div><div class=l>conexões</div></div><div class=b><div class=n>${vi.profundidade}</div><div class=l>saltos</div></div><div class=b><div class=n style=color:#ef9f27>${vi.completude}%</div><div class=l>completude</div></div></div><div class=compbar><i style=width:${vi.completude}%></i></div><div style="font-size:10px;color:#7a8290;margin-top:5px">sabe definir <b style=color:#9fe1cb>${vi.definidos}</b> de ${vi.conceitos} conceitos que cita · lacunas: <span style=color:#d98a94>${(vi.lacunas||[]).slice(0,5).join(', ')||'—'}</span></div>`;}
+ const vi=st.vitais;if(vi){document.getElementById('vitais').innerHTML=`<div class=vg><div class=b><div class=n>${vi.fatos}</div><div class=l>fatos</div></div><div class=b><div class=n>${vi.ligacoes}</div><div class=l>conexões</div></div><div class=b><div class=n>${vi.profundidade}</div><div class=l>saltos</div></div><div class=b><div class=n style=color:#ef9f27>${vi.completude}%</div><div class=l>completude</div></div></div><div class=compbar><i style=width:${vi.completude}%></i></div><div style="font-size:10px;color:#7a8290;margin-top:5px">sabe definir <b style=color:#9fe1cb>${vi.definidos}</b>/${vi.conceitos} conceitos que cita · lacunas: <span style=color:#d98a94>${(vi.lacunas||[]).slice(0,5).join(', ')||'—'}</span></div><div style="font-size:10px;color:#7a8290;margin-top:4px">estrutura: <b style=color:#8fb5d8>${vi.ilhas}</b> ilhas · <b style=color:#8fb5d8>${vi.pontes}</b> pontos frágeis · densidade <b style=color:#8fb5d8>${vi.bitsfato}</b> bits/fato (${vi.compressao}×)${vi.frageis&&vi.frageis.length?' · frágil: '+vi.frageis.slice(0,3).join(', '):''}</div>`;}
  feed.innerHTML=(st.autofeed||[]).slice().reverse().map(a=>`<div class=af><span style=color:#7a8290>${a.t}</span> não sabia <span class=g>${a.gap}</span><br><b>professor:</b> ${a.fact}</div>`).join('')||'<span style=color:#666>ligue o modo automático e ela vai estudar sozinha</span>';
  chat.innerHTML=(st.chat||[]).map(m=>`<div class="m ${m[0]}">${m[0]=='voce'?'você: ':'IARA: '}${m[1]}</div>`).join('');chat.scrollTop=chat.scrollHeight;
  trace.innerHTML=(st.trace||[]).map(t=>`<div class="tr r-${t[0]}"><b>${t[0]}</b> · ${t[1]}${t[2]?` <span class=d>${t[2]}</span>`:''}</div>`).join('')||'<span style=color:#666>mande uma mensagem…</span>';

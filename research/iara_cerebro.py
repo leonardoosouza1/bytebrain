@@ -404,7 +404,7 @@ class Cerebro:
             sf=Counter()                                            # SUB-ÁREAS = raiz do sujeito compartilhada por ≥2 fatos (micro)
             for m in members:
                 for e in subj[m]: sf[e]+=1
-            subhubs=set(); MEMB={"dashes":True,"color":{"color":"#232a3a"},"font":{"size":0}}  # arestas de ESTRUTURA (sem rótulo)
+            subhubs=set(); MEMB={"dashes":True,"color":{"color":"#232a3a"},"font":{"size":0},"layer":"estrutura"}  # arestas de ESTRUTURA
             for m in members:
                 nodes[m]=dict(id=m,label=lbl(m),group=KG.get(sd[m]["kind"],"seed"),fact=sd[m]["stmt"],title=sd[m]["stmt"])
                 opts=[(sf[e],len(e),e) for e in subj[m] if sf[e]>=2]
@@ -428,11 +428,11 @@ class Cerebro:
             for o in (v.get("obj") or [])[:3]:
                 tgt=match(o)
                 if tgt and tgt!=k:
-                    edges.append({"from":k,"to":tgt,"label":rel,"color":{"color":"#2f7f6e","highlight":"#5dcaa5"},"width":1.4})
+                    edges.append({"from":k,"to":tgt,"label":rel,"color":{"color":"#2f7f6e","highlight":"#5dcaa5"},"width":1.4,"layer":"relacao"})
                 elif not tgt and len(o)>=4:
                     gid="?"+o
                     if gid not in nodes: nodes[gid]=dict(id=gid,label=o,group="gap",title="citado mas ainda NÃO definido (lacuna)")
-                    edges.append({"from":k,"to":gid,"label":rel,"color":{"color":"#7a3550","highlight":"#e24b4a"},"width":1.2})
+                    edges.append({"from":k,"to":gid,"label":rel,"color":{"color":"#7a3550","highlight":"#e24b4a"},"width":1.2,"layer":"lacuna"})
         return dict(nodes=list(nodes.values()),edges=edges)
     def _vitals(s):                                                 # SINAIS VITAIS do conhecimento
         facts={k:v for k,v in s.seeds.items() if v.get("kind")!="raciocinado"}
@@ -513,6 +513,13 @@ button{background:#12251d;border:1px solid #1d9e75;color:#9fe1cb;padding:8px 10p
 .compbar{height:8px;background:#171b24;border-radius:4px;margin-top:6px;overflow:hidden}.compbar>i{display:block;height:100%;background:linear-gradient(90deg,#e24b4a,#ef9f27,#5dcaa5)}
 #leg{position:fixed;bottom:8px;left:340px;font-size:10px;color:#9ab;background:#0d1016cc;border:1px solid #1e2330;border-radius:6px;padding:5px 8px;z-index:8}
 #leg b{font-weight:400}.lz{display:inline-block;width:16px;height:0;border-top:2px solid;vertical-align:middle;margin-right:3px}
+#ctl{position:fixed;top:52px;right:348px;width:186px;background:#0d1016ee;border:1px solid #1e2330;border-radius:8px;padding:9px;z-index:8;font-size:11px}
+#ctl h3{font-size:9px;color:#7fb59f;letter-spacing:1px;text-transform:uppercase;margin:0 0 6px}
+.cr{display:flex;align-items:center;gap:6px;margin:5px 0}.cr span{width:58px;color:#9ab}.cr input[type=range]{flex:1;accent-color:#5dcaa5;height:3px}
+.ctog{display:grid;grid-template-columns:1fr 1fr;gap:3px 8px;margin-top:8px;padding-top:7px;border-top:1px solid #1a1f2a}
+.ctog label{display:flex;align-items:center;gap:4px;color:#bcd;cursor:pointer}.ctog input{accent-color:#5dcaa5}
+#ctl button{width:100%;margin-top:8px;padding:5px;font-size:11px}
+#ctlgear{position:fixed;top:52px;right:348px;z-index:9;background:#12251d;border:1px solid #1d9e75;color:#9fe1cb;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;display:none}
 </style></head><body>
 <div id=bar><h1>◉ IARA · CÉREBRO</h1><span id=stt>acordando…</span><span style=flex:1></span><span id=fatos style="color:#ba7517;font-size:11px"></span></div>
 <div id=L>
@@ -528,6 +535,21 @@ button{background:#12251d;border:1px solid #1d9e75;color:#9fe1cb;padding:8px 10p
  <div id=ci><input id=qi placeholder="fale, ensine ('X é Y') ou pergunte…" onkeydown="if(event.key=='Enter')ask()"><button onclick=ask()>enviar</button></div>
 </div>
 <div id=net></div>
+<div id=ctlgear onclick="ctl.style.display='block';ctlgear.style.display='none'">⚙ grafo</div>
+<div id=ctl>
+ <h3>controle do grafo <span style="float:right;cursor:pointer;color:#7a8290" onclick="ctl.style.display='none';ctlgear.style.display='block'">✕</span></h3>
+ <div class=cr><span>repulsão</span><input type=range id=s_rep min=2000 max=45000 value=24000 oninput=phys()></div>
+ <div class=cr><span>distância</span><input type=range id=s_dist min=60 max=380 value=160 oninput=phys()></div>
+ <div class=cr><span>gravidade</span><input type=range id=s_grav min=0 max=100 value=12 oninput=phys()></div>
+ <div class=cr><span>ligação</span><input type=range id=s_link min=0 max=25 value=4 oninput=phys()></div>
+ <div class=ctog>
+  <label><input type=checkbox id=t_rel checked onchange=filt()> relações</label>
+  <label><input type=checkbox id=t_gap checked onchange=filt()> lacunas</label>
+  <label><input type=checkbox id=t_grp checked onchange=filt()> grupos</label>
+  <label><input type=checkbox id=t_lbl onchange=filt()> rótulos</label>
+ </div>
+ <button onclick=refit()>reorganizar</button>
+</div>
 <div id=leg><span class=lz style=border-color:#2f7f6e></span><b>relação verdadeira</b> &nbsp; <span class=lz style="border-color:#7a3550"></span><b>lacuna (não sabe)</b> &nbsp; <span class=lz style="border-color:#232a3a;border-top-style:dashed"></span><b>estrutura</b></div>
 <div id=R>
  <div class=card style=border:0><h2>nó selecionado (clique no grafo)</h2><div id=det><span style=color:#666>clique num nó pra ver o fato e as relações</span></div></div>
@@ -542,7 +564,14 @@ const opt={nodes:{shape:'dot',size:13,font:{color:'#dfe6f0',size:12,face:'monosp
   subarea:{shape:'diamond',color:{background:'#2a2340',border:'#8f7fd6'},size:17,font:{size:12,color:'#cbb8ff'},borderWidth:2},
   seed:{color:{background:'#ba7517',border:'#ef9f27'}},auto:{color:{background:'#0f6e56',border:'#5dcaa5'}},vision:{color:{background:'#0f6e56',border:'#1d9e75'}},reason:{color:{background:'#3c3489',border:'#7f77dd'}},
   gap:{shape:'dot',size:8,color:{background:'#3a2030',border:'#e24b4a'},font:{color:'#d98a94',size:10}},tree:{color:{background:'#1b2130',border:'#2a3550'},size:9}},
- physics:{barnesHut:{gravitationalConstant:-14000,springLength:120,springConstant:.03,centralGravity:.25,avoidOverlap:.3},stabilization:{iterations:150}},interaction:{hover:true,tooltipDelay:120}};
+ physics:{barnesHut:{gravitationalConstant:-24000,springLength:160,springConstant:.04,centralGravity:.12,avoidOverlap:.6,damping:.5},stabilization:{iterations:170}},interaction:{hover:true,hoverConnectedEdges:true,tooltipDelay:120}};
+function phys(){if(!net)return;net.setOptions({physics:{barnesHut:{gravitationalConstant:-(+s_rep.value),springLength:+s_dist.value,centralGravity:(+s_grav.value)/100,springConstant:(+s_link.value)/100,avoidOverlap:.6,damping:.5}}});}
+function filt(){if(!nodes)return;
+ const R=t_rel.checked,Gp=t_gap.checked,Gr=t_grp.checked;
+ nodes.forEach(n=>{const h=((n.group=='topic'||n.group=='subarea')&&!Gr)||(n.group=='gap'&&!Gp);if(!!(nodes.get(n.id)||{}).hidden!==h)nodes.update({id:n.id,hidden:h})});
+ edges.forEach(e=>{const h=(e.layer=='estrutura'&&!Gr)||(e.layer=='lacuna'&&!Gp)||(e.layer=='relacao'&&!R);if(!!(edges.get(e.id)||{}).hidden!==h)edges.update({id:e.id,hidden:h})});
+ net.setOptions({edges:{font:{size:t_lbl.checked?9:0}}});}
+function refit(){if(net){net.stabilize();setTimeout(()=>net.fit({animation:true}),500);}}
 async function Po(u,b){return (await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})).json()}
 async function ask(){const v=qi.value.trim();if(!v)return;qi.value='';await Po('/think',{q:v});poll()}
 async function upl(){const fl=f.files[0];if(!fl)return;const r=new FileReader();r.onload=async()=>{await Po('/see',{img:r.result});poll()};r.readAsDataURL(fl)}
@@ -564,7 +593,8 @@ async function grefresh(){if(!net)return;const g=await(await fetch('/graph')).js
  g.nodes.forEach(n=>nodes.update(n));
  const geid=new Set(g.edges.map(e=>e.from+'|'+e.to));
  edges.getIds().forEach(id=>{if(!geid.has(id))edges.remove(id)});
- g.edges.forEach(e=>{edges.update({id:e.from+'|'+e.to,...e})})}
+ g.edges.forEach(e=>{edges.update({id:e.from+'|'+e.to,...e})});
+ filt()}
 function render(st){document.getElementById('stt').textContent=st.busy?'🧠 pensando…':(st.ready?`online · ${st.conceitos} conceitos · ${st.neuronios} neurônios`:'acordando os neurônios…');
  document.getElementById('fatos').textContent=st.ready?`${st.nfatos||0} fatos na memória`:'';
  if(!net&&st.ready){nodes=new vis.DataSet();edges=new vis.DataSet();net=new vis.Network(document.getElementById('net'),{nodes,edges},opt);net.on('click',p=>{if(p.nodes.length)showDet(p.nodes[0])})}

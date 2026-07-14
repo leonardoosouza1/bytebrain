@@ -2096,3 +2096,12 @@ persistidas" + base. (2) NÃO ESQUECE MAIS: removido o decaimento passivo; memó
 só opcional (sleep_forget, e consolidado/reusado é imune). (3) BATERIA SÓLIDA: 16 fatos + 10 contas (10/10
 exatas) + curiosidade gated (3 pesquisas) + RETENÇÃO 8/8; esqueceu=0; vivos 19. UI renderiza (grafo 19 nós/
 12.8k px, 19 memórias todas vivas). iara_panel.py, http://localhost:3050 (gerenciado pelo preview).
+
+## iara_weights — EXPLORADOR DE PESOS interativo (o pedido do Leonardo)
+Pegou os pesos reais do Qwen-3B e virou grafo NAVEGÁVEL/CLICÁVEL, pré-carregado (nada de digitar bateria).
+65.895 conceitos (tokens-palavra do embedding) + 110.080 neurônios profundos (down_proj das 10 últimas
+camadas). vis-network (clica/arrasta/zoom). Backend: vizinhos = cosseno do embedding (o que o modelo
+ASSOCIA); neurônios-que-escrevem-X = down_proj·E[x] topk (logit-lens, como WS22); decode do neurônio =
+value·E^T topk. Testado no navegador: clicar 'France' expande (French/Germany/Paris/Spain/Italy) + painel
+mostra os neurônios (L33·n5568 escreve French/France…) + chips clicáveis. 'brain'→cerebral/neuroscience.
+Interação confirmada por eval (48→51 nós ao clicar, 8 neurônios no painel). iara_weights.py, porta 3050.

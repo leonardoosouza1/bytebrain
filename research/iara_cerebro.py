@@ -23,6 +23,8 @@ HERE=os.path.dirname(os.path.abspath(__file__)); MODEL=VLID
 STATE=os.path.join(HERE,"iara_cerebro_state.json"); DEEP=8
 WN={"zero":0,"um":1,"uma":1,"dois":2,"duas":2,"tres":3,"quatro":4,"cinco":5,"seis":6,"sete":7,"oito":8,"nove":9,"dez":10,"cem":100,"mil":1000}
 STOP_KEY={"qual","que","quem","onde","quando","como","porque","por","uma","para","com","dos","das","the","and","voce","isso","essa","esse","capital","cor","nome","the","this","that"}
+GAP_SKIP={"bombeia","recebe","fica","ficam","leva","levam","traz","trazem","passa","impede","impedem","envolve","conduz","derrete","espalha","espalham","irriga","irrigam","enche","enchem","bate","batem","chega","chegam","volta","voltam","aperta","empurra","saem","entra","acontece",
+ "pobre","rico","forte","natural","proprio","propria","todo","toda","longe","dentro","cerca","mais","menos","primeiro","fora","depois","perto","grande","grandes","pequena","principal"}  # verbos/adjetivos: NÃO são conceitos-lacuna
 def strip_acc(s): return "".join(c for c in unicodedata.normalize("NFKD",s) if not unicodedata.combining(c))
 def nrm(s): return re.sub(r"[^a-z0-9 ]","",strip_acc(s).lower()).strip()
 def compute(q):
@@ -47,7 +49,9 @@ class Cerebro:
     def __init__(s):
         s.ready=False; s.busy=False; s.lock=threading.Lock()
         s.seeds={}; s.chat=[]; s.trace=[]; s.dop=0.2; s.cort=0.1; s.cur=0.3
+        s.auto=False; s.autofeed=[]; s.auto_every=40; s.gap_now=None          # modo autônomo (professor Claude)
         s._load_state(); threading.Thread(target=s._load,daemon=True).start()
+        threading.Thread(target=s._autoloop,daemon=True).start()
     def _load(s):
         t=time.time(); print("[carregando cérebro UNIFICADO: Qwen2.5-VL-3B (córtex + olho + pesos)…]",flush=True)
         s.proc=AutoProcessor.from_pretrained(VLID); s.tok=AutoTokenizer.from_pretrained(VLID)
@@ -174,6 +178,54 @@ class Cerebro:
             T.append(("VERIFICADOR","ancoragem nos fatos",chk.strip()[:20]))
             if chk.strip().lower().startswith(("n","não","nao")): return None  # não ancorada → abstém
         return a
+    # ---- APRENDIZADO AUTÔNOMO (ela observa o que menos sabe; o professor Claude ensina) ----
+    def _domain(s):                                                    # do que ela é especialista (tópico dominante)
+        from collections import Counter
+        c=Counter()
+        for k,v in s.seeds.items():
+            for w in nrm(k+" "+v["stmt"]).split():
+                if len(w)>=5 and w not in STOP_KEY and w not in s.wmap: c[w]+=1
+        return c.most_common(1)[0][0] if c else None
+    def _gaps(s):                                                      # FRONTEIRA: conceitos citados mas NÃO definidos (+ raros)
+        from collections import Counter
+        subj=set()
+        for k in s.seeds: subj|=set(w for w in nrm(k).split() if len(w)>=4)
+        ref=Counter()
+        for v in s.seeds.values():
+            for w in nrm(v["stmt"]).split():
+                if len(w)>=4 and w not in STOP_KEY and w not in GAP_SKIP and w not in subj: ref[w]+= (2 if w not in s.wmap else 1)  # termo do domínio pesa mais
+        return [w for w,_ in ref.most_common(12) if w not in subj]
+    def _professor(s,concept,domain):                                  # Claude via SUBSCRIPTION (claude -p) = professor externo
+        import subprocess
+        ctx="; ".join([v["stmt"] for v in list(s.seeds.values())[-6:]])
+        prompt=(f"Você é professor de {domain}. O aluno já sabe: {ctx}. "
+                f"Ensine UM fato NOVO, curto e verdadeiro sobre '{concept}' (ligado a esse tema), "
+                f"em UMA frase em português começando pelo conceito. Responda só a frase, sem aspas nem introdução.")
+        try:
+            r=subprocess.run(["/home/leonardo/.local/bin/claude","-p",prompt],capture_output=True,text=True,timeout=120)
+            line=(r.stdout or "").strip().split("\n")[0].strip().strip('"').rstrip(".")
+            return line if 12<len(line)<240 and "?" not in line else None
+        except Exception: return None
+    def _autoteach(s):                                                 # UM ciclo: acha lacuna → professor ensina → grava
+        if not s.ready or len(s.seeds)<2: return
+        dom=s._domain() or "o assunto"; gaps=s._gaps()
+        if not gaps: return
+        concept=gaps[0]; s.gap_now=concept
+        fact=s._professor(concept,dom)
+        if not fact: return
+        with s.lock:
+            s._seed(concept,fact,"pesquisado"); s.dop=min(1,s.dop+0.35)
+            s.autofeed.append(dict(t=time.strftime("%H:%M:%S"),gap=concept,fact=fact)); s.autofeed=s.autofeed[-40:]
+            s.chat.append(("iara",f"🔎 não sabia bem sobre '{concept}' — o professor me ensinou: {fact}"))
+        s.gap_now=None
+    def _autoloop(s):
+        while True:
+            if getattr(s,"auto",False) and s.ready:
+                try: s._autoteach()
+                except Exception: pass
+            for _ in range(max(5,int(s.auto_every))):
+                time.sleep(1)
+                if not getattr(s,"auto",False): break
     def _seed(s,concept,stmt,kind):
         k=nrm(concept)
         if kind=="raciocinado" and s.seeds.get(k,{}).get("kind")=="ensinado": return  # não sobrescreve fato ensinado
@@ -267,7 +319,7 @@ class Cerebro:
         if not ids: return None
         return torch.nn.functional.normalize(s.E[ids].float().mean(0),dim=0)
     def graph(s):
-        KG={"ensinado":"seed","visto":"vision"}
+        KG={"ensinado":"seed","visto":"vision","pesquisado":"auto"}
         seeds=[(k,v) for k,v in s.seeds.items() if v["kind"]!="raciocinado"]  # grafo = FATOS, não derivações
         nodes={};edges=[]
         if not s.ready:
@@ -285,25 +337,40 @@ class Cerebro:
                 a,b=keys[i],keys[j]; cos=float(emb[a]@emb[b]) if emb[a] is not None and emb[b] is not None else 0.0
                 if cos>=0.5 or (nov[a]&nov[b]): parent[find(a)]=find(b)
         from collections import Counter
+        lbl=lambda m:re.sub(r"\s+\d+$","",m)                        # rótulo limpo (tira sufixo "2")
+        stem=lambda w:w[:-1] if len(w)>4 and w.endswith("s") else w  # singular≈plural (arterias≈arteria)
         clusters={}
         for k in keys: clusters.setdefault(find(k),[]).append(k)
         for members in clusters.values():
-            cnt=Counter()                                           # rótulo = entidade dominante, preferindo nome-próprio do domínio
+            cnt=Counter()                                           # rótulo do TÓPICO = entidade dominante (macro)
             for m in members:
                 for w in ent[m]: cnt[w]+=1
             mx=max(cnt.values()); cands=[w for w,c in cnt.items() if c==mx]
             topic=sorted(cands,key=lambda w:((w in s.wmap),-len(w)))[0] if cands else members[0]
-            if len(members)>=2:
-                tid="◆"+topic; nodes[tid]=dict(id=tid,label=topic.upper(),group="topic")
-                for m in members:
-                    nodes[m]=dict(id=m,label=m,group=KG.get(sd[m]["kind"],"seed"))
+            if len(members)<2:
+                m=members[0]; nodes[m]=dict(id=m,label=lbl(m),group=KG.get(sd[m]["kind"],"seed"),fact=sd[m]["stmt"],title=sd[m]["stmt"]); continue
+            tid="◆"+topic; nodes[tid]=dict(id=tid,label=topic.upper(),group="topic")
+            subj={m:set(stem(w) for w in nrm(m).split() if len(w)>=4 and w not in STOP_KEY and stem(w)!=stem(topic)) for m in members}
+            sf=Counter()                                            # SUB-ÁREAS = raiz do sujeito compartilhada por ≥2 fatos (micro)
+            for m in members:
+                for e in subj[m]: sf[e]+=1
+            subhubs=set()
+            for m in members:
+                nodes[m]=dict(id=m,label=lbl(m),group=KG.get(sd[m]["kind"],"seed"),fact=sd[m]["stmt"],title=sd[m]["stmt"])
+                opts=[(sf[e],len(e),e) for e in subj[m] if sf[e]>=2]
+                area=max(opts)[2] if opts else None
+                if area:
+                    sh="▸"+area
+                    if sh not in subhubs:
+                        subhubs.add(sh); nodes[sh]=dict(id=sh,label=area.upper(),group="subarea"); edges.append({"from":tid,"to":sh,"label":""})
+                    edges.append({"from":sh,"to":m,"label":s._rel_type(sd[m]["stmt"],topic)})
+                else:
                     edges.append({"from":tid,"to":m,"label":s._rel_type(sd[m]["stmt"],topic)})
-            else:
-                m=members[0]; nodes[m]=dict(id=m,label=m,group=KG.get(sd[m]["kind"],"seed"))
         return dict(nodes=list(nodes.values()),edges=edges)
     def state(s):
         return dict(ready=s.ready,busy=s.busy,conceitos=len(getattr(s,'clean',[])) if s.ready else 0,neuronios=int(getattr(s,'vals',torch.zeros(0)).shape[0]) if s.ready else 0,
             chat=s.chat[-12:],trace=[list(t)+[""]*(3-len(t)) for t in s.trace],dop=round(s.dop,2),cort=round(s.cort,2),cur=round(s.cur,2),
+            auto=s.auto,auto_every=s.auto_every,gap_now=s.gap_now,nfatos=len(s.seeds),autofeed=s.autofeed[-8:],
             sementes=[dict(c=k,s=v["v"],k=v["kind"],t=v.get("t","")) for k,v in list(s.seeds.items())[-12:]])
 
 C=Cerebro()
@@ -327,45 +394,73 @@ button{background:#12251d;border:1px solid #1d9e75;color:#9fe1cb;padding:8px 10p
 .r-SENSORIAL{border-color:#1d9e75}.r-ROTEADOR{border-color:#888}.r-REFLEXO{border-color:#378add}.r-CÓRTEX{border-color:#7f77dd}.r-HIPOCAMPO{border-color:#ef9f27}.r-NEUROMOD{border-color:#e24b4a}.r-VERIFICADOR{border-color:#5dcaa5}
 .tr b{color:#cfe;font-size:10px}.tr .d{color:#9ab}
 .sd{font-size:11px;color:#bcd;margin:3px 0;border-left:2px solid #ba7517;padding-left:6px}
+#auto{display:flex;align-items:center;gap:8px;font-size:11px}#auto b{color:#9fe1cb}
+.sw{width:38px;height:20px;border-radius:11px;background:#25202a;border:1px solid #3a2f45;cursor:pointer;position:relative;transition:.2s}
+.sw.on{background:#173a2b;border-color:#1d9e75}.sw i{position:absolute;top:1px;left:1px;width:16px;height:16px;border-radius:50%;background:#7a8290;transition:.2s}.sw.on i{left:19px;background:#5dcaa5}
+.gap{font-size:11px;color:#ef9f27;margin-top:5px;min-height:14px}
+.af{font-size:11px;line-height:1.35;margin:4px 0;border-left:2px solid #1d9e75;padding-left:6px;color:#cfe}.af b{color:#9fe1cb}.af .g{color:#ef9f27}
+#det{font-size:12px;line-height:1.45;color:#cfe}#det .k{color:#9fe1cb;font-weight:700}#det .rel{color:#93a6c4}
+.pill{display:inline-block;font-size:9px;padding:1px 6px;border-radius:8px;background:#12251d;border:1px solid #1d9e75;color:#9fe1cb;margin:1px}
 </style></head><body>
-<div id=bar><h1>◉ IARA · CÉREBRO</h1><span id=stt>acordando…</span></div>
+<div id=bar><h1>◉ IARA · CÉREBRO</h1><span id=stt>acordando…</span><span style=flex:1></span><span id=fatos style="color:#ba7517;font-size:11px"></span></div>
 <div id=L>
+ <div class=card><h2>aprendizado autônomo (professor Claude)</h2>
+   <div id=auto><div class=sw id=sw onclick=toggleAuto()><i></i></div><span>modo automático — ela estuda o que menos sabe</span></div>
+   <div class=gap id=gap></div>
+   <div style="display:flex;gap:6px;margin-top:6px"><button onclick=teachNow() style="font-size:11px;padding:5px 8px">ensinar 1 agora</button><span style=color:#7a8290;font-size:10px;align-self:center>ciclo a cada ~40s</span></div>
+ </div>
  <div class=card><h2>hormônios (neuromodulação)</h2><div id=horm></div></div>
- <div class=card><div id=drop onclick="f.click()">📷 arraste/clique uma imagem — o córtex visual analisa (freq/cores/bordas/conceito)</div><input type=file id=f accept=image/* style=display:none onchange=upl()></div>
+ <div class=card><div id=drop onclick="f.click()">📷 arraste/clique uma imagem — o córtex visual lê (texto/tabela) e analisa freq/cores</div><input type=file id=f accept=image/* style=display:none onchange=upl()></div>
  <div id=chat></div>
- <div id=ci><input id=qi placeholder="fale com ela… (pergunta, conta, ou 'X é Y')" onkeydown="if(event.key=='Enter')ask()"><button onclick=ask()>enviar</button></div>
+ <div id=ci><input id=qi placeholder="fale, ensine ('X é Y') ou pergunte…" onkeydown="if(event.key=='Enter')ask()"><button onclick=ask()>enviar</button></div>
 </div>
 <div id=net></div>
 <div id=R>
- <div class=card style=border:0><h2>trace do último pensamento (passo a passo)</h2><div id=trace></div></div>
- <div class=card style=border:0><h2>sementes de memória (hipocampo)</h2><div id=seeds></div></div>
+ <div class=card style=border:0><h2>nó selecionado (clique no grafo)</h2><div id=det><span style=color:#666>clique num nó pra ver o fato e as relações</span></div></div>
+ <div class=card style=border:0><h2>professor ↔ aluna (o que ela aprendeu sozinha)</h2><div id=feed></div></div>
+ <div class=card style=border:0><h2>trace do último pensamento</h2><div id=trace></div></div>
 </div>
 <script>
-let net,nodes,edges;
+let net,nodes,edges,gmap={},autoOn=false;
 const opt={nodes:{shape:'dot',size:13,font:{color:'#dfe6f0',size:12,face:'monospace'},borderWidth:2},
- edges:{color:{color:'#33405c',highlight:'#5b8fd6'},smooth:{type:'continuous'},width:.8,arrows:{to:{enabled:true,scaleFactor:.45}},font:{color:'#93a6c4',size:10,face:'monospace',strokeWidth:3,strokeColor:'#090b10',align:'middle'}},
- groups:{topic:{shape:'hexagon',color:{background:'#20344f',border:'#5b8fd6'},size:26,font:{size:15,color:'#bcd8ff'},borderWidth:3},
-  seed:{color:{background:'#ba7517',border:'#ef9f27'}},reason:{color:{background:'#3c3489',border:'#7f77dd'}},vision:{color:{background:'#0f6e56',border:'#1d9e75'}},tree:{color:{background:'#1b2130',border:'#2a3550'},size:9}},
- physics:{barnesHut:{gravitationalConstant:-8000,springLength:135,centralGravity:.2},stabilization:{iterations:120}},interaction:{hover:true}};
+ edges:{color:{color:'#33405c',highlight:'#5b8fd6'},smooth:{type:'continuous'},width:.8,arrows:{to:{enabled:true,scaleFactor:.4}},font:{color:'#93a6c4',size:9,face:'monospace',strokeWidth:3,strokeColor:'#090b10',align:'middle'}},
+ groups:{topic:{shape:'hexagon',color:{background:'#20344f',border:'#5b8fd6'},size:30,font:{size:16,color:'#bcd8ff'},borderWidth:3},
+  subarea:{shape:'diamond',color:{background:'#2a2340',border:'#8f7fd6'},size:17,font:{size:12,color:'#cbb8ff'},borderWidth:2},
+  seed:{color:{background:'#ba7517',border:'#ef9f27'}},auto:{color:{background:'#0f6e56',border:'#5dcaa5'}},vision:{color:{background:'#0f6e56',border:'#1d9e75'}},reason:{color:{background:'#3c3489',border:'#7f77dd'}},tree:{color:{background:'#1b2130',border:'#2a3550'},size:9}},
+ physics:{barnesHut:{gravitationalConstant:-14000,springLength:120,springConstant:.03,centralGravity:.25,avoidOverlap:.3},stabilization:{iterations:150}},interaction:{hover:true,tooltipDelay:120}};
 async function Po(u,b){return (await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})).json()}
 async function ask(){const v=qi.value.trim();if(!v)return;qi.value='';await Po('/think',{q:v});poll()}
 async function upl(){const fl=f.files[0];if(!fl)return;const r=new FileReader();r.onload=async()=>{await Po('/see',{img:r.result});poll()};r.readAsDataURL(fl)}
+async function toggleAuto(){autoOn=!autoOn;await Po('/auto',{on:autoOn});poll()}
+async function teachNow(){await Po('/auto',{now:1});setTimeout(poll,500)}
 async function poll(){try{const st=await(await fetch('/state')).json();render(st)}catch(e){}}
-async function grefresh(){if(!net)return;const g=await(await fetch('/graph')).json();
+function showDet(id){const n=gmap[id];const det=document.getElementById('det');if(!n){det.innerHTML='<span style=color:#666>nó não encontrado</span>';return;}
+ const rel=(edges.get()||[]).filter(e=>e.to===id&&e.label).map(e=>e.label);
+ const kids=(edges.get()||[]).filter(e=>e.from===id).map(e=>gmap[e.to]?gmap[e.to].label:e.to);
+ let h=`<div class=k>${n.label}</div>`;
+ if(n.group==='topic')h+=`<div style=color:#7a8290;font-size:11px>tópico · ${kids.length} ligações</div>`;
+ else if(n.group==='subarea')h+=`<div style=color:#7a8290;font-size:11px>sub-área · ${kids.length} fatos</div>`;
+ else{if(rel.length)h+=`<div class=rel>relação: ${rel.map(r=>'<span class=pill>'+r+'</span>').join('')}</div>`;if(n.fact)h+=`<div style=margin-top:6px>${n.fact}</div>`;if(n.group==='auto')h+='<div style="color:#5dcaa5;font-size:10px;margin-top:4px">🔎 aprendido sozinha (professor)</div>';}
+ if(kids.length&&(n.group==='topic'||n.group==='subarea'))h+=`<div style=margin-top:6px;color:#9ab;font-size:10px>${kids.slice(0,12).join(' · ')}</div>`;
+ det.innerHTML=h;}
+async function grefresh(){if(!net)return;const g=await(await fetch('/graph')).json();gmap={};g.nodes.forEach(n=>gmap[n.id]=n);
  const gid=new Set(g.nodes.map(n=>n.id));
- nodes.getIds().forEach(id=>{const nd=nodes.get(id);if(nd&&nd.group!=='tree'&&!gid.has(id))nodes.remove(id)});
+ nodes.getIds().forEach(id=>{if(!gid.has(id))nodes.remove(id)});
  g.nodes.forEach(n=>nodes.update(n));
  const geid=new Set(g.edges.map(e=>e.from+'|'+e.to));
- edges.getIds().forEach(id=>{const ed=edges.get(id);if(ed&&ed.label!==undefined&&!geid.has(id))edges.remove(id)});
+ edges.getIds().forEach(id=>{if(!geid.has(id))edges.remove(id)});
  g.edges.forEach(e=>{edges.update({id:e.from+'|'+e.to,...e})})}
-function render(st){document.getElementById('stt').textContent=st.busy?'🧠 pensando…':(st.ready?`cérebro online · ${st.conceitos} conceitos · ${st.neuronios} neurônios`:'acordando os neurônios…');
- if(!net&&st.ready){nodes=new vis.DataSet();edges=new vis.DataSet();net=new vis.Network(document.getElementById('net'),{nodes,edges},opt);net.on('click',async p=>{if(p.nodes.length){const g=await(await fetch('/expand?w='+encodeURIComponent(p.nodes[0]))).json();g.nodes.forEach(n=>{if(!nodes.get(n.id))nodes.add({...n,group:'tree'})});g.edges.forEach(e=>{const id=e.from+'|'+e.to;if(!edges.get(id))edges.add({id,...e})})}})}
+function render(st){document.getElementById('stt').textContent=st.busy?'🧠 pensando…':(st.ready?`online · ${st.conceitos} conceitos · ${st.neuronios} neurônios`:'acordando os neurônios…');
+ document.getElementById('fatos').textContent=st.ready?`${st.nfatos||0} fatos na memória`:'';
+ if(!net&&st.ready){nodes=new vis.DataSet();edges=new vis.DataSet();net=new vis.Network(document.getElementById('net'),{nodes,edges},opt);net.on('click',p=>{if(p.nodes.length)showDet(p.nodes[0])})}
+ autoOn=!!st.auto;document.getElementById('sw').className='sw'+(autoOn?' on':'');
+ document.getElementById('gap').innerHTML=st.gap_now?`🔎 estudando agora: <b>${st.gap_now}</b> — perguntando ao professor…`:(autoOn?'observando o grafo pelo que menos conhece…':'desligado');
  horm.innerHTML=[['dopamina',st.dop,'#63c923'],['cortisol',st.cort,'#e24b4a'],['curiosidade',st.cur,'#ef9f27']].map(([n,v,c])=>`<div class=h><span>${n}</span><span>${v}</span></div><div class=tk><div class=tf style="width:${v*100}%;background:${c}"></div></div>`).join('');
+ feed.innerHTML=(st.autofeed||[]).slice().reverse().map(a=>`<div class=af><span style=color:#7a8290>${a.t}</span> não sabia <span class=g>${a.gap}</span><br><b>professor:</b> ${a.fact}</div>`).join('')||'<span style=color:#666>ligue o modo automático e ela vai estudar sozinha</span>';
  chat.innerHTML=(st.chat||[]).map(m=>`<div class="m ${m[0]}">${m[0]=='voce'?'você: ':'IARA: '}${m[1]}</div>`).join('');chat.scrollTop=chat.scrollHeight;
- trace.innerHTML=(st.trace||[]).map(t=>`<div class="tr r-${t[0]}"><b>${t[0]}</b> · ${t[1]}${t[2]?` <span class=d>${t[2]}</span>`:''}</div>`).join('')||'<span style=color:#666>mande uma mensagem ou imagem…</span>';
- seeds.innerHTML=(st.sementes||[]).slice().reverse().map(x=>`<div class=sd><b style=color:#ef9f27>${x.c}</b> <span style=color:#666>(${x.k})</span><br>${x.s}</div>`).join('')||'<span style=color:#666>nada aprendido ainda</span>';
+ trace.innerHTML=(st.trace||[]).map(t=>`<div class="tr r-${t[0]}"><b>${t[0]}</b> · ${t[1]}${t[2]?` <span class=d>${t[2]}</span>`:''}</div>`).join('')||'<span style=color:#666>mande uma mensagem…</span>';
  grefresh()}
-setInterval(poll,700);poll();
+setInterval(poll,900);poll();
 </script></body></html>"""
 class H(BaseHTTPRequestHandler):
     def log_message(s,*a): pass
@@ -384,6 +479,11 @@ class H(BaseHTTPRequestHandler):
         elif s.path=="/raw":                                        # Qwen CRU (sem memória) — p/ comparar
             a=C._gen([{"role":"system","content":"Responda em 1 frase curta e direta."},{"role":"user","content":d.get("q","")}]) if C.ready else "acordando…"
             r=dict(say=a)
+        elif s.path=="/auto":                                       # liga/desliga o aprendizado autônomo
+            if "on" in d: C.auto=bool(d["on"])
+            if d.get("every"): C.auto_every=max(10,int(d["every"]))
+            if d.get("now"): threading.Thread(target=C._autoteach,daemon=True).start()   # forçar 1 ciclo já
+            r=dict(auto=C.auto,every=C.auto_every)
         else: r={"err":1}
         s._j(r)
 if __name__=="__main__":

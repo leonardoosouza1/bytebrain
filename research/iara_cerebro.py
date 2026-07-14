@@ -17,12 +17,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 import numpy as np, torch
 from PIL import Image
-from transformers import AutoModelForCausalLM, AutoTokenizer, AutoProcessor, AutoModelForImageTextToText
-VLM_ID="HuggingFaceTB/SmolVLM-256M-Instruct"
-HERE=os.path.dirname(os.path.abspath(__file__)); MODEL="/home/leonardo/projects/LLM/llm-lab/models/Qwen2.5-3B-Instruct"
+from transformers import AutoTokenizer, AutoProcessor, AutoModelForImageTextToText
+VLID="Qwen/Qwen2.5-VL-3B-Instruct"   # UM modelo: córtex (raciocínio) + olho (visão) + fonte dos pesos/neurônios
+HERE=os.path.dirname(os.path.abspath(__file__)); MODEL=VLID
 STATE=os.path.join(HERE,"iara_cerebro_state.json"); DEEP=8
-CLIP_VOCAB=["a dog","a cat","a person","a car","a building","a tower","a tree","a flower","a mountain","a beach",
- "the sky","a city street","food","a computer","a bird","a boat","the Eiffel Tower","a landscape","a face","a robot"]
 WN={"zero":0,"um":1,"uma":1,"dois":2,"duas":2,"tres":3,"quatro":4,"cinco":5,"seis":6,"sete":7,"oito":8,"nove":9,"dez":10,"cem":100,"mil":1000}
 STOP_KEY={"qual","que","quem","onde","quando","como","porque","por","uma","para","com","dos","das","the","and","voce","isso","essa","esse","capital","cor","nome","the","this","that"}
 def strip_acc(s): return "".join(c for c in unicodedata.normalize("NFKD",s) if not unicodedata.combining(c))
@@ -51,9 +49,12 @@ class Cerebro:
         s.seeds={}; s.chat=[]; s.trace=[]; s.dop=0.2; s.cort=0.1; s.cur=0.3
         s._load_state(); threading.Thread(target=s._load,daemon=True).start()
     def _load(s):
-        t=time.time(); print("[carregando cérebro: Qwen-3B + córtex visual CLIP…]",flush=True)
-        s.tok=AutoTokenizer.from_pretrained(MODEL); m=AutoModelForCausalLM.from_pretrained(MODEL,dtype=torch.float16).to("cuda").eval()
-        s.model=m; s.E=m.model.embed_tokens.weight.detach(); s.nw=m.model.norm.weight.detach(); s.Et=s.E.t().contiguous()
+        t=time.time(); print("[carregando cérebro UNIFICADO: Qwen2.5-VL-3B (córtex + olho + pesos)…]",flush=True)
+        s.proc=AutoProcessor.from_pretrained(VLID); s.tok=AutoTokenizer.from_pretrained(VLID)
+        m=AutoModelForImageTextToText.from_pretrained(VLID,dtype=torch.float16).to("cuda").eval()
+        s.model=m; s.vlm=m; s.vlmproc=s.proc                        # MESMO modelo raciocina E vê
+        LM=m.model.language_model                                    # o transformer de texto dentro do VL
+        s.E=m.get_input_embeddings().weight.detach(); s.nw=LM.norm.weight.detach(); s.Et=s.E.t().contiguous()
         V=s.E.shape[0]; toks=s.tok.convert_ids_to_tokens(list(range(V)))
         raw=[(i,(toks[i] or "").replace("Ġ","")) for i in range(V) if re.fullmatch(r"Ġ?[A-Za-z][a-zA-Z]{2,}",toks[i] or "")]
         norms=s.E[[i for i,_ in raw]].float().norm(dim=1); med=float(norms.median())
@@ -62,19 +63,18 @@ class Cerebro:
             if re.search(r"[a-z][A-Z]",w) or not(0.55*med<nm<1.8*med): continue
             s.clean.append(i);s.words.append(w)
         s.wmap={w.lower():s.clean[j] for j,w in enumerate(s.words)}; s.Ec=torch.nn.functional.normalize(s.E[s.clean].float(),dim=1)
-        NL=m.config.num_hidden_layers;INT=m.config.intermediate_size;vals=[];s.idx=[]
-        for L in range(NL-DEEP,NL): dp=m.model.layers[L].mlp.down_proj.weight.detach();vals.append((dp.t()*s.nw).contiguous());s.idx+=[(L,i) for i in range(INT)]
+        NL=len(LM.layers);INT=LM.layers[0].mlp.down_proj.weight.shape[1];vals=[];s.idx=[]
+        for L in range(NL-DEEP,NL): dp=LM.layers[L].mlp.down_proj.weight.detach();vals.append((dp.t()*s.nw).contiguous());s.idx+=[(L,i) for i in range(INT)]
         s.vals=torch.cat(vals,0)
-        s.vlmproc=AutoProcessor.from_pretrained(VLM_ID); s.vlm=AutoModelForImageTextToText.from_pretrained(VLM_ID,dtype=torch.float16).to("cuda").eval()
-        s.ready=True; print(f"[cérebro ONLINE em {time.time()-t:.0f}s · {len(s.clean)} conceitos · {s.vals.shape[0]} neurônios · olho VLM]",flush=True)
+        s.ready=True; print(f"[cérebro ONLINE em {time.time()-t:.0f}s · {len(s.clean)} conceitos · {s.vals.shape[0]} neurônios · Qwen2.5-VL-3B unificado]",flush=True)
     @torch.no_grad()
     def _vlm(s,img,q):
         msgs=[{"role":"user","content":[{"type":"image"},{"type":"text","text":q}]}]
-        p=s.vlmproc.apply_chat_template(msgs,add_generation_prompt=True)
-        inp=s.vlmproc(text=p,images=[img],return_tensors="pt").to("cuda")
-        out=s.vlm.generate(**inp,max_new_tokens=140,do_sample=False)
-        r=s.vlmproc.decode(out[0,inp.input_ids.shape[1]:],skip_special_tokens=True).strip()
-        return " ".join(r.split())[:400]
+        p=s.proc.apply_chat_template(msgs,add_generation_prompt=True,tokenize=False)
+        inp=s.proc(text=[p],images=[img],return_tensors="pt").to("cuda")
+        out=s.vlm.generate(**inp,max_new_tokens=220,do_sample=False)
+        r=s.proc.batch_decode(out[:,inp.input_ids.shape[1]:],skip_special_tokens=True)[0].strip()
+        return " ".join(r.split())[:600]
     # ---- persistência ----
     def _save_state(s):
         try: json.dump({"seeds":s.seeds,"dop":s.dop,"cur":s.cur},open(STATE,"w"),ensure_ascii=False)
@@ -91,10 +91,14 @@ class Cerebro:
     def neighbors(s,word,k=6):
         tid=s._wid(word)
         if tid is None: return []
-        v=torch.nn.functional.normalize(s.E[tid].float(),dim=0); sims=s.Ec@v; top=torch.topk(sims,k+6).indices.tolist(); out=[]
+        v=torch.nn.functional.normalize(s.E[tid].float(),dim=0); sims=s.Ec@v
+        top=torch.topk(sims,k+40).indices.tolist(); base=nrm(word); out=[]
         for j in top:
-            w=s.words[j]
-            if w.lower()!=word.lower() and w.lower() not in [o[0].lower() for o in out]: out.append((w,round(float(sims[j]),3)))
+            w=s.words[j]; wn=nrm(w)
+            if len(w)<4: continue                                   # sem fragmentos curtos (Ein, Rel)
+            if wn==base or wn in base or base in wn: continue        # sem pedaço do próprio termo (relat, instein)
+            if wn in [nrm(o[0]) for o in out]: continue
+            out.append((w,round(float(sims[j]),3)))
             if len(out)>=k: break
         return out
     @torch.no_grad()
@@ -127,10 +131,11 @@ class Cerebro:
     # ---- córtex pré-frontal ----
     @torch.no_grad()
     def _gen(s,messages,n=64):
-        text=s.tok.apply_chat_template(messages,add_generation_prompt=True,tokenize=False)
-        ids=s.tok(text,return_tensors="pt").input_ids.to("cuda")
-        out=s.model.generate(ids,max_new_tokens=n,do_sample=False,pad_token_id=s.tok.eos_token_id)
-        return s.tok.decode(out[0,ids.shape[1]:],skip_special_tokens=True).strip()
+        conv=[{"role":r["role"],"content":[{"type":"text","text":r["content"]}]} for r in messages]  # formato VL, só-texto
+        txt=s.proc.apply_chat_template(conv,add_generation_prompt=True,tokenize=False)
+        ins=s.proc(text=[txt],return_tensors="pt").to("cuda")
+        out=s.model.generate(**ins,max_new_tokens=n,do_sample=False,pad_token_id=s.tok.eos_token_id)
+        return s.proc.batch_decode(out[:,ins.input_ids.shape[1]:],skip_special_tokens=True)[0].strip()
     def _reason(s,q,T):
         qn=nrm(q); qw=set(w for w in qn.split() if len(w)>=4 and w not in STOP_KEY)   # palavras de conteúdo da pergunta
         scored=[]                                                       # RANKEIA por relevância (não ordem de inserção)
@@ -146,11 +151,16 @@ class Cerebro:
         a=s._gen([{"role":"system","content":sysmsg},{"role":"user","content":u}]).split("\n")[0].strip()
         return None if (not a or "não sei" in a.lower() or nrm(a)=="nao sei") else a
     def _seed(s,concept,stmt,kind):
-        k=nrm(concept); s.seeds[k]={"v":stmt,"stmt":stmt,"kind":kind,"t":time.strftime("%H:%M")}; s._save_state()
-    def _key(s,text):
-        cand=[w for w in re.findall(r"[A-Za-zÀ-ÿ]{3,}",text) if nrm(w) in s.wmap and nrm(w) not in STOP_KEY]
+        k=nrm(concept)
+        if kind=="raciocinado" and s.seeds.get(k,{}).get("kind")=="ensinado": return  # não sobrescreve fato ensinado
+        s.seeds[k]={"v":stmt,"stmt":stmt,"kind":kind,"t":time.strftime("%H:%M")}; s._save_state()
+    def _key(s,text):                                               # chave = SUJEITO da pergunta (não palavra da resposta)
+        z=text.strip().rstrip("?.! ")
+        m=re.search(r"(?:o que (?:é|eh|são|sao)|quem (?:criou|inventou|é|foi|era)|qual(?: é| eh)?(?: a| o| as| os)?|onde (?:é|fica|foi)|quando (?:é|foi))\s+(?:a |o |as |os |da |do |de )?(.+)$",z,re.I)
+        subj=(m.group(1) if m else z).strip()
+        cand=[w for w in re.findall(r"[A-Za-zÀ-ÿ]{3,}",subj) if nrm(w) in s.wmap and nrm(w) not in STOP_KEY]
         caps=[w for w in cand if w[0].isupper()]
-        return caps[0] if caps else (cand[0] if cand else None)
+        return caps[0] if caps else (cand[0] if cand else None)     # 1ª maiúscula (sujeito) ou 1ª palavra de conteúdo
     # ---- pipeline com TRACE ----
     def think(s,q):
         with s.lock:
@@ -160,11 +170,17 @@ class Cerebro:
             if r:
                 T.append(("ROTEADOR","é conta → REFLEXO (rápido)","")); T.append(("REFLEXO","matemática exata",f"{r[0]} = {r[1]}"))
                 s.dop=min(1,s.dop+0.15); ans=f"{r[0]} = {r[1]}"; s._finish(T,t0,ans); return dict(say=ans)
-            st=re.match(r"^(.{2,60}?)\s+(?:é|eh|significa)\s+(.{2,})$",q.strip().rstrip("."),re.I)
-            if st and "?" not in q:
-                c,a=st.group(1).strip(),st.group(2).strip(); T.append(("ROTEADOR","é declaração → HIPOCAMPO"))
-                s._seed(c,f"{c} é {a}","ensinado"); T.append(("HIPOCAMPO","gravou SEMENTE",f"{c} = {a}"))
-                s.dop=min(1,s.dop+0.4); T.append(("NEUROMOD","dopamina ↑ (aprendeu)",f"{s.dop:.2f}")); ans=f"Entendi! {c} é {a}."; s._finish(T,t0,ans); return dict(say=ans,concept=c)
+            qs=q.strip().rstrip("."); words=qs.split()
+            if "?" not in q:                                        # modo ENSINO: guarda fato (não só "X é Y")
+                st=re.match(r"^(.{2,70}?)\s+(?:é|eh|s[ãa]o|era|foi|significa)\s+(.{2,})$",qs,re.I)
+                c=stmt=None
+                if st: c=st.group(1).strip(); stmt=qs                # guarda a FRASE ORIGINAL (não força "é")
+                elif len(words)>=4 and qs[:1].isupper():             # frase declarativa (derrete, tem…) — chave = 1º nome próprio
+                    caps=re.findall(r"\b[A-ZÀ-Ý][A-Za-zÀ-ÿ]{2,}",qs); c=(caps[0] if caps else s._key(qs)) or words[0]; stmt=qs
+                if c and stmt:
+                    T.append(("ROTEADOR","é declaração → HIPOCAMPO")); s._seed(c,stmt,"ensinado")
+                    T.append(("HIPOCAMPO","gravou SEMENTE",stmt)); s.dop=min(1,s.dop+0.4)
+                    T.append(("NEUROMOD","dopamina ↑ (aprendeu)",f"{s.dop:.2f}")); ans=f"Entendi! {stmt}"; s._finish(T,t0,ans); return dict(say=ans,concept=c)
             k=nrm(q)
             if k in s.seeds:                                       # match EXATO do conceito → reflexo (rápido)
                 sv=s.seeds[k]; T.append(("ROTEADOR","conceito exato na memória → REFLEXO")); T.append(("REFLEXO","semente (rápido)",sv["stmt"])); s._finish(T,t0,sv["v"]); return dict(say=sv["v"],concept=s._key(k))
@@ -205,14 +221,55 @@ class Cerebro:
         s.busy=False
     def tick(s):
         with s.lock: s.dop=0.2+(s.dop-0.2)*0.92; s.cort=0.1+(s.cort-0.1)*0.9; s.cur=0.3+(s.cur-0.3)*0.95
+    def _rel_type(s,stmt,topic):                                    # que RELAÇÃO essa semente tem com o tópico
+        z=nrm(stmt)
+        if re.search(r"\b(criou|inventou|fisico|formulou|desenvolveu|descobriu|autor)\b",z): return "quem criou"
+        if "formula" in z or "=" in stmt or re.search(r"\bmc\b",z): return "fórmula"
+        if "capital" in z: return "capital"
+        if re.search(r"\b(liga|construid|construida|construidas|feita|feito)\b",z): return "feito de"
+        if re.search(r"\b(planeta|estrela|vive em|fica|localiza)\b",z): return "onde"
+        if re.search(r"\b(1[6-9]\d\d|20\d\d)\b",z) or "ano" in z.split(): return "quando"
+        if re.search(r"\b(curvatura|uniao|dimensoes|passar|associa|conjunto|especie)\b",z): return "conceito"
+        return "o que é"
+    @torch.no_grad()
+    def _stmt_emb(s,txt):                                           # embedding semântico da frase (média das palavras de conteúdo)
+        ids=[s.wmap[w] for w in dict.fromkeys(nrm(txt).split()) if w in s.wmap and w not in STOP_KEY and len(w)>=4]
+        if not ids: return None
+        return torch.nn.functional.normalize(s.E[ids].float().mean(0),dim=0)
     def graph(s):
+        KG={"ensinado":"seed","visto":"vision"}
+        seeds=[(k,v) for k,v in s.seeds.items() if v["kind"]!="raciocinado"]  # grafo = FATOS, não derivações
         nodes={};edges=[]
-        for k,v in s.seeds.items():
-            cid=v.get("v"); label=k
-            nodes[k]=dict(id=k,label=k,group={"ensinado":"seed","raciocinado":"reason","visto":"vision"}.get(v["kind"],"seed"))
-            if s.ready:
-                for nb,sim in s.neighbors(k,3):
-                    nodes.setdefault(nb,dict(id=nb,label=nb,group="tree")); edges.append({"from":k,"to":nb})
+        if not s.ready:
+            for k,v in seeds: nodes[k]=dict(id=k,label=k,group=KG.get(v["kind"],"seed"))
+            return dict(nodes=list(nodes.values()),edges=edges)
+        ent={k:set(w for w in nrm(k+" "+v["stmt"]).split() if len(w)>=4 and w not in STOP_KEY) for k,v in seeds}
+        nov={k:set(w for w in ent[k] if w not in s.wmap) for k in ent}   # entidades PRÓPRIAS (fora do vocab: Kelbros, Zorvane…)
+        emb={k:s._stmt_emb(v["stmt"]) for k,v in seeds}; keys=[k for k,_ in seeds]; sd=dict(seeds)
+        parent={k:k for k in keys}
+        def find(x):
+            while parent[x]!=x: parent[x]=parent[parent[x]];x=parent[x]
+            return x
+        for i in range(len(keys)):                                  # une por SEMÂNTICA (embedding) OU nome-próprio compartilhado
+            for j in range(i+1,len(keys)):
+                a,b=keys[i],keys[j]; cos=float(emb[a]@emb[b]) if emb[a] is not None and emb[b] is not None else 0.0
+                if cos>=0.5 or (nov[a]&nov[b]): parent[find(a)]=find(b)
+        from collections import Counter
+        clusters={}
+        for k in keys: clusters.setdefault(find(k),[]).append(k)
+        for members in clusters.values():
+            cnt=Counter()                                           # rótulo = entidade dominante, preferindo nome-próprio do domínio
+            for m in members:
+                for w in ent[m]: cnt[w]+=1
+            mx=max(cnt.values()); cands=[w for w,c in cnt.items() if c==mx]
+            topic=sorted(cands,key=lambda w:((w in s.wmap),-len(w)))[0] if cands else members[0]
+            if len(members)>=2:
+                tid="◆"+topic; nodes[tid]=dict(id=tid,label=topic.upper(),group="topic")
+                for m in members:
+                    nodes[m]=dict(id=m,label=m,group=KG.get(sd[m]["kind"],"seed"))
+                    edges.append({"from":tid,"to":m,"label":s._rel_type(sd[m]["stmt"],topic)})
+            else:
+                m=members[0]; nodes[m]=dict(id=m,label=m,group=KG.get(sd[m]["kind"],"seed"))
         return dict(nodes=list(nodes.values()),edges=edges)
     def state(s):
         return dict(ready=s.ready,busy=s.busy,conceitos=len(getattr(s,'clean',[])) if s.ready else 0,neuronios=int(getattr(s,'vals',torch.zeros(0)).shape[0]) if s.ready else 0,
@@ -255,14 +312,22 @@ button{background:#12251d;border:1px solid #1d9e75;color:#9fe1cb;padding:8px 10p
 </div>
 <script>
 let net,nodes,edges;
-const opt={nodes:{shape:'dot',size:13,font:{color:'#dfe6f0',size:12,face:'monospace'},borderWidth:2},edges:{color:{color:'#2a3550'},smooth:{type:'continuous'},width:.6},
- groups:{seed:{color:{background:'#ba7517',border:'#ef9f27'}},reason:{color:{background:'#3c3489',border:'#7f77dd'}},vision:{color:{background:'#0f6e56',border:'#1d9e75'}},tree:{color:{background:'#1b2130',border:'#2a3550'},size:9}},
- physics:{barnesHut:{gravitationalConstant:-5000,springLength:110},stabilization:{iterations:90}},interaction:{hover:true}};
+const opt={nodes:{shape:'dot',size:13,font:{color:'#dfe6f0',size:12,face:'monospace'},borderWidth:2},
+ edges:{color:{color:'#33405c',highlight:'#5b8fd6'},smooth:{type:'continuous'},width:.8,arrows:{to:{enabled:true,scaleFactor:.45}},font:{color:'#93a6c4',size:10,face:'monospace',strokeWidth:3,strokeColor:'#090b10',align:'middle'}},
+ groups:{topic:{shape:'hexagon',color:{background:'#20344f',border:'#5b8fd6'},size:26,font:{size:15,color:'#bcd8ff'},borderWidth:3},
+  seed:{color:{background:'#ba7517',border:'#ef9f27'}},reason:{color:{background:'#3c3489',border:'#7f77dd'}},vision:{color:{background:'#0f6e56',border:'#1d9e75'}},tree:{color:{background:'#1b2130',border:'#2a3550'},size:9}},
+ physics:{barnesHut:{gravitationalConstant:-8000,springLength:135,centralGravity:.2},stabilization:{iterations:120}},interaction:{hover:true}};
 async function Po(u,b){return (await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})).json()}
 async function ask(){const v=qi.value.trim();if(!v)return;qi.value='';await Po('/think',{q:v});poll()}
 async function upl(){const fl=f.files[0];if(!fl)return;const r=new FileReader();r.onload=async()=>{await Po('/see',{img:r.result});poll()};r.readAsDataURL(fl)}
 async function poll(){try{const st=await(await fetch('/state')).json();render(st)}catch(e){}}
-async function grefresh(){if(!net)return;const g=await(await fetch('/graph')).json();const ids=g.nodes.map(n=>n.id);g.nodes.forEach(n=>{if(!nodes.get(n.id))nodes.add(n)});g.edges.forEach(e=>{const id=e.from+'|'+e.to;if(!edges.get(id))edges.add({id,...e})})}
+async function grefresh(){if(!net)return;const g=await(await fetch('/graph')).json();
+ const gid=new Set(g.nodes.map(n=>n.id));
+ nodes.getIds().forEach(id=>{const nd=nodes.get(id);if(nd&&nd.group!=='tree'&&!gid.has(id))nodes.remove(id)});
+ g.nodes.forEach(n=>nodes.update(n));
+ const geid=new Set(g.edges.map(e=>e.from+'|'+e.to));
+ edges.getIds().forEach(id=>{const ed=edges.get(id);if(ed&&ed.label!==undefined&&!geid.has(id))edges.remove(id)});
+ g.edges.forEach(e=>{edges.update({id:e.from+'|'+e.to,...e})})}
 function render(st){document.getElementById('stt').textContent=st.busy?'🧠 pensando…':(st.ready?`cérebro online · ${st.conceitos} conceitos · ${st.neuronios} neurônios`:'acordando os neurônios…');
  if(!net&&st.ready){nodes=new vis.DataSet();edges=new vis.DataSet();net=new vis.Network(document.getElementById('net'),{nodes,edges},opt);net.on('click',async p=>{if(p.nodes.length){const g=await(await fetch('/expand?w='+encodeURIComponent(p.nodes[0]))).json();g.nodes.forEach(n=>{if(!nodes.get(n.id))nodes.add({...n,group:'tree'})});g.edges.forEach(e=>{const id=e.from+'|'+e.to;if(!edges.get(id))edges.add({id,...e})})}})}
  horm.innerHTML=[['dopamina',st.dop,'#63c923'],['cortisol',st.cort,'#e24b4a'],['curiosidade',st.cur,'#ef9f27']].map(([n,v,c])=>`<div class=h><span>${n}</span><span>${v}</span></div><div class=tk><div class=tf style="width:${v*100}%;background:${c}"></div></div>`).join('');

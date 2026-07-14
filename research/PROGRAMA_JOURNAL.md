@@ -2113,3 +2113,16 @@ FREQUÊNCIAS (FFT 2D radial: baixa/média/alta = liso vs textura, liga no Resona
 Testado: Eiffel (baixa20/média38/alta42%, Eiffel 97%), cachorro (bordas 0.063 muita estrutura, dog 81%).
 Cada passo = entrada de TRACE (pra achar bug). Próximo: montar o cérebro anatômico (reflexo rápido +
 córtex Qwen lento + hipocampo/memória sementes+árvores + neuromodulação + verificador) trace-first, num só.
+
+## iara_cerebro — CÉREBRO ANATÔMICO unificado, trace-first (a PoC pedida pelo Leonardo)
+Reúne as peças validadas em REGIÕES, num painel só, TUDO rastreável. Testado ponta a ponta:
+- REFLEXO (rápido ~1ms): 12x12=144 · matemática exata.
+- CÓRTEX PRÉ-FRONTAL (Qwen-3B, lento ~900ms): "capital da França"→Paris (sabe o mundo SEM ensinar).
+- HIPOCAMPO: ensino "Brasília é a capital do Brasil"→semente; "onde fica Brasília?"→raciocina com a semente.
+- SENSORIAL/visão: imagem→sinal/luz/cores(azul=céu)/bordas/FREQUÊNCIAS FFT(baixa20/média38/alta42%)/CLIP
+  (Eiffel 97%)→CÓRTEX interpreta ("quatro colunas, formato retangular"). Detalhe rastreável (liga Resonance Forest).
+- NEUROMOD (dopamina↑ ao aprender/ver) + VERIFICADOR (confiante/abstém) + trace de CADA passo (região+detalhe+ms).
+Painel: grafo sementes+árvores(pesos, clicável) + trace passo a passo + hormônios + entrada texto/imagem.
+61986 conceitos limpos (glitch tokens filtrados) + 88064 neurônios. Consertos: _gen robusto (template→texto),
+_key ignora stopwords, trace normalizado. iara_cerebro.py, localhost:3050. Sofri com churn de servidor (preview
+vs kill) — resolvido subindo 1 instância gerenciada estável.

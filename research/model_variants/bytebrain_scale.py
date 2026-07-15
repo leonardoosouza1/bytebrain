@@ -99,9 +99,11 @@ def batch(arr, bs):
 
 
 class Block(nn.Module):
-    def __init__(s, d, nh):
+    def __init__(s, d, nh, lowrank=False):
         super().__init__(); s.nh = nh; s.ln1 = nn.LayerNorm(d); s.ln2 = nn.LayerNorm(d)
-        s.qkv = nn.Linear(d, 3*d); s.proj = nn.Linear(d, d)
+        r = d // 2                                    # descoberta: coerencia do Qwen mora na ATENCAO baixo-posto
+        s.qkv = nn.Sequential(nn.Linear(d, r, bias=False), nn.Linear(r, 3*d)) if lowrank else nn.Linear(d, 3*d)
+        s.proj = nn.Sequential(nn.Linear(d, r, bias=False), nn.Linear(r, d)) if lowrank else nn.Linear(d, d)
         s.mlp = nn.Sequential(nn.Linear(d, 4*d), nn.GELU(), nn.Linear(4*d, d))
     def forward(s, x):
         B, L, D = x.shape; h = s.ln1(x)
@@ -113,12 +115,24 @@ class Block(nn.Module):
 
 
 class ByteGPT(nn.Module):
-    def __init__(s, nl, d, nh):
-        super().__init__(); s.tok = nn.Embedding(256, d); s.pos = nn.Embedding(LB, d)
-        s.blocks = nn.ModuleList([Block(d, nh) for _ in range(nl)]); s.lnf = nn.LayerNorm(d); s.head = nn.Linear(d, 256)
+    def __init__(s, nl, d, nh, emb="free", lowrank=False):
+        super().__init__(); s.emb_mode = emb; s.pos = nn.Embedding(LB, d)
+        if emb in ("free", "augment"):                # table livre (aprende estrutura emergente, como o Qwen)
+            s.tok = nn.Embedding(256, d)
+        if emb in ("bits", "augment"):                # direcao dos 8 BITS (bit5=case) — prior estrutural
+            s.bitdir = nn.Parameter(0.02 * torch.randn(8, d)); s.b0 = nn.Parameter(torch.zeros(d))
+        if emb == "bits":
+            s.resid = nn.Embedding(256, d); nn.init.normal_(s.resid.weight, 0, 0.01)
+        s.blocks = nn.ModuleList([Block(d, nh, lowrank) for _ in range(nl)]); s.lnf = nn.LayerNorm(d); s.head = nn.Linear(d, 256)
+    def _tok(s, x):
+        if s.emb_mode == "free": return s.tok(x)
+        bits = ((x.unsqueeze(-1) >> torch.arange(8, device=x.device)) & 1).float()   # os 8 bits do byte
+        struct = s.b0 + bits @ s.bitdir
+        if s.emb_mode == "augment": return s.tok(x) + struct       # livre + prior de bit (nao perde capacidade)
+        return struct + s.resid(x)                                 # bits-only
     def forward(s, x):
         p = torch.arange(x.size(1), device=x.device)
-        h = s.tok(x) + s.pos(p)[None]
+        h = s._tok(x) + s.pos(p)[None]
         for b in s.blocks: h = b(h)
         return s.head(s.lnf(h))
 

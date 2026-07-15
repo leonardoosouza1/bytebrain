@@ -158,11 +158,12 @@ class Cerebro:
     def _gather(s,q,cap=10):                                            # RECUPERAÇÃO MULTI-HOP (espalhamento de ativação — tese-água)
         qn=nrm(q); qw=set(w for w in qn.split() if len(w)>=4 and w not in STOP_KEY)
         rare=lambda W:{w for w in W if w not in s.wmap}                  # termos distintivos do domínio (guiam o 2º salto)
-        ent={k:set(w for w in nrm(k+" "+v["stmt"]).split() if len(w)>=4 and w not in STOP_KEY) for k,v in s.seeds.items()}
+        KB={k:v for k,v in s.seeds.items() if v.get("kind")!="raciocinado"}  # ancora só em FATOS (raciocínio não polui/deriva)
+        ent={k:set(w for w in nrm(k+" "+v["stmt"]).split() if len(w)>=4 and w not in STOP_KEY) for k,v in KB.items()}
         chosen=[]; used=set(); hops=[]; frontier=qw
         for hop in range(2):
             scored=[]
-            for k,v in s.seeds.items():
+            for k,v in KB.items():
                 if k in used: continue
                 e=ent[k]; sc=2*len(rare(frontier)&rare(e))+len(frontier&e)+(2 if k in qn else 0)
                 if sc>0: scored.append((sc,k,v["stmt"]))
@@ -171,7 +172,13 @@ class Cerebro:
             if take: hops.append((hop,[k for _,k,_ in take]))
             frontier=set().union(*[rare(ent[k]) for _,k,_ in take[:2]]) if take else set()  # segue a PONTE (raros dos 2 melhores)
             if len(chosen)>=cap or not frontier: break
-        return chosen[:cap],hops
+        lbb=lambda k:re.sub(r"\s+\d+$","",k)                             # TRAVESSIA: puxa OUTROS fatos do MESMO conceito focal (2º salto real)
+        bases={lbb(k) for k in used}; extra=[]
+        for k,v in KB.items():
+            if k not in used and lbb(k) in bases: extra.append(v["stmt"]); used.add(k)
+        chosen+=extra[:3]
+        if extra: hops.append((9,extra[:3]))
+        return chosen[:cap+3],hops
     def _reason(s,q,T):
         facts,hops=s._gather(q,cap=10)
         for hop,ks in hops: T.append(("HIPOCAMPO",f"ativação hop {hop} → sementes",", ".join(ks)))

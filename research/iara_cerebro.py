@@ -234,7 +234,7 @@ class Cerebro:
                 f"Ensine UM fato NOVO, curto e verdadeiro sobre '{concept}' (ligado a esse tema), "
                 f"em UMA frase em português começando pelo conceito. Responda só a frase, sem aspas nem introdução.")
         try:
-            r=subprocess.run(["/home/leonardo/.local/bin/claude","-p",prompt],capture_output=True,text=True,timeout=120)
+            r=subprocess.run(["/home/leonardo/.local/bin/claude","-p","--model","haiku",prompt],capture_output=True,text=True,timeout=120)  # Haiku on fire
             line=(r.stdout or "").strip().split("\n")[0].strip().strip('"').rstrip(".")
             return line if 12<len(line)<240 and "?" not in line else None
         except Exception: return None

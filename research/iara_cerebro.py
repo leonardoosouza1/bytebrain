@@ -64,6 +64,7 @@ class Cerebro:
         s.ready=False; s.busy=False; s.lock=threading.Lock()
         s.seeds={}; s.chat=[]; s.trace=[]; s.dop=0.2; s.cort=0.1; s.cur=0.3
         s.auto=False; s.autofeed=[]; s.auto_every=40; s.gap_now=None          # modo autônomo (professor Claude)
+        s.fg=None; s.fg_ready=False                                           # motor-fluxo (voz byte-nativa: grafo+água+fala)
         s._load_state(); threading.Thread(target=s._load,daemon=True).start()
         threading.Thread(target=s._autoloop,daemon=True).start()
     def _load(s):
@@ -86,6 +87,7 @@ class Cerebro:
         s.vals=torch.cat(vals,0)
         s._fill_triples()                                          # extrai as conexões verdadeiras dos fatos já sabidos
         s.ready=True; print(f"[cérebro ONLINE em {time.time()-t:.0f}s · {len(s.clean)} conceitos · {s.vals.shape[0]} neurônios · Qwen2.5-VL-3B unificado]",flush=True)
+        threading.Thread(target=s._build_flowgraph,daemon=True).start()      # a voz byte-nativa (motor-fluxo) em background
     @torch.no_grad()
     def _vlm(s,img,q):
         msgs=[{"role":"user","content":[{"type":"image"},{"type":"text","text":q}]}]
@@ -256,6 +258,59 @@ class Cerebro:
             for _ in range(max(5,int(s.auto_every))):
                 time.sleep(1)
                 if not getattr(s,"auto",False): break
+    # ---- MOTOR-FLUXO: a VOZ byte-nativa (grafo do corpus+sementes = FATOS; fala do Qwen = FORMA) ----
+    def _build_flowgraph(s):
+        try:
+            from collections import defaultdict, Counter
+            import numpy as np
+            corp="/home/leonardo/projects/LLM/bytebrain/data/pt_corpus_cortex.txt"
+            txt=open(corp,encoding="utf-8",errors="ignore").read(12_000_000)+" "+" ".join(v["stmt"] for v in s.seeds.values())  # corpus + o que ELA sabe
+            toks=re.findall(r"[A-Za-zÀ-ÿ]+|[.,;:!?]",txt); freq=Counter(toks); VOC={w for w,c in freq.items() if c>=8}
+            sq=[t for t in toks if t in VOC]; ORD=[1,2,3]; tab={o:defaultdict(Counter) for o in ORD}; bi=defaultdict(Counter)
+            for i in range(3,len(sq)):
+                for o in ORD: tab[o][tuple(sq[i-o:i])][sq[i]]+=1
+            for a,b in zip(sq,sq[1:]): bi[a][b]+=1
+            for o in ORD: tab[o]={k:v for k,v in tab[o].items() if sum(v.values())>=2}
+            s.fg=dict(tab=tab,bi=bi,freq=freq,VOC=VOC,ORD=ORD,np=np,defaultdict=defaultdict,Counter=Counter); s.fg_ready=True
+            print(f"[voz byte-nativa pronta · {len(VOC)} palavras no grafo]",flush=True)
+        except Exception as e: print("[flowgraph falhou]",str(e)[:80],flush=True)
+    def _agua_fg(s,tema,r=0.15,it=20):
+        fg=s.fg; np=fg["np"]; sd=fg["Counter"]()
+        for w in re.findall(r"[A-Za-zÀ-ÿ]+",tema):
+            if w in fg["VOC"]: sd[w]+=1
+        Z=sum(sd.values()) or 1; sd={k:v/Z for k,v in sd.items()}; w=dict(sd)
+        for _ in range(it):
+            nw=fg["defaultdict"](float)
+            for u,wu in w.items():
+                c=fg["bi"].get(u)
+                if wu<1e-6 or not c: continue
+                t=sum(c.values())
+                for v,cnt in c.items(): nw[v]+=(1-r)*wu*cnt/t
+            for k,sv in sd.items(): nw[k]+=r*sv
+            w=nw
+        return w
+    @torch.no_grad()
+    def falar(s,tema,N=45,beta=1.6,alpha=1.1):                       # gera texto grounded (fluxo) + fluente (fala do Qwen)
+        if not s.fg_ready: return dict(say="ainda montando a voz byte-nativa…")
+        fg=s.fg; np=fg["np"]; from collections import deque
+        w=s._agua_fg(tema); out=[x for x in re.findall(r"[A-Za-zÀ-ÿ]+",tema)[:2] if x in fg["VOC"]] or ["A"]; recent=deque(maxlen=10)
+        wg=lambda x: w.get(x,1e-9)/(fg["freq"][x]+1)
+        for _ in range(N):
+            c=None
+            for o in [3,2,1]:
+                k=tuple(out[-o:])
+                if len(k)==o and k in fg["tab"][o]: c=fg["tab"][o][k]; break
+            if c is None: c=fg["bi"].get(out[-1]) or fg["Counter"]({".":1})
+            cand=list(c.keys())[:36]; base=np.array([c[x] for x in cand],float)
+            wa=np.array([wg(x) for x in cand]); rep=np.array([0.2 if x in recent else 1.0 for x in cand])
+            gs=np.log(base/base.sum()+1e-9)+beta*np.log(wa+1e-12)+np.log(rep)
+            lp=torch.log_softmax(s.model(input_ids=s.tok(" ".join(out),return_tensors="pt").input_ids.to("cuda")).logits[0,-1].float(),-1).cpu()  # FALA
+            qs=np.array([float(lp[s.tok(" "+x,add_special_tokens=False).input_ids[0]]) if s.tok(" "+x,add_special_tokens=False).input_ids else -20 for x in cand])
+            sc=gs+alpha*qs; p=np.exp(sc-sc.max()); p/=p.sum()
+            nb=cand[int(np.random.choice(len(cand),p=p))]; w[nb]=w.get(nb,0)*0.4; recent.append(nb); out.append(nb)
+        txt=re.sub(r"\s+([.,;:!?])",r"\1"," ".join(out))
+        with s.lock: s.chat.append(("voce",f"[falar sobre: {tema}]")); s.chat.append(("iara",txt))
+        return dict(say=txt)
     def _triple(s,stmt):                                            # extrai (relação, [objetos]) da frase → CONEXÃO VERDADEIRA
         z=re.sub(r"\s+"," ",stmt.strip().rstrip("."))
         m=re.match(rf"^(.{{1,55}}?)\s+({PRED})\s+(.+)$",z,re.I)
@@ -485,7 +540,7 @@ class Cerebro:
     def state(s):
         return dict(ready=s.ready,busy=s.busy,conceitos=len(getattr(s,'clean',[])) if s.ready else 0,neuronios=int(getattr(s,'vals',torch.zeros(0)).shape[0]) if s.ready else 0,
             chat=s.chat[-12:],trace=[list(t)+[""]*(3-len(t)) for t in s.trace],dop=round(s.dop,2),cort=round(s.cort,2),cur=round(s.cur,2),
-            auto=s.auto,auto_every=s.auto_every,gap_now=s.gap_now,nfatos=len(s.seeds),autofeed=s.autofeed[-8:],vitais=s._vitals() if s.ready else None,
+            auto=s.auto,auto_every=s.auto_every,gap_now=s.gap_now,nfatos=len(s.seeds),autofeed=s.autofeed[-8:],vitais=s._vitals() if s.ready else None,fg_ready=s.fg_ready,
             sementes=[dict(c=k,s=v["v"],k=v["kind"],t=v.get("t","")) for k,v in list(s.seeds.items())[-12:]])
 
 C=Cerebro()
@@ -540,6 +595,7 @@ button{background:#12251d;border:1px solid #1d9e75;color:#9fe1cb;padding:8px 10p
  <div class=card><div id=drop onclick="f.click()">📷 arraste/clique uma imagem — o córtex visual lê (texto/tabela) e analisa freq/cores</div><input type=file id=f accept=image/* style=display:none onchange=upl()></div>
  <div id=chat></div>
  <div id=ci><input id=qi placeholder="fale, ensine ('X é Y') ou pergunte…" onkeydown="if(event.key=='Enter')ask()"><button onclick=ask()>enviar</button></div>
+ <div id=ci style=border-top:0;padding-top:0><input id=ti placeholder="🗣 falar sobre um tema (voz byte-nativa: fluxo+fala)…" onkeydown="if(event.key=='Enter')falar()"><button onclick=falar() id=btf title="grafo dá os fatos, Qwen dá a forma">falar</button></div>
 </div>
 <div id=net></div>
 <div id=ctlgear onclick="ctl.style.display='block';ctlgear.style.display='none'">⚙ grafo</div>
@@ -581,6 +637,7 @@ function filt(){if(!nodes)return;
 function refit(){if(net){net.stabilize();setTimeout(()=>net.fit({animation:true}),500);}}
 async function Po(u,b){return (await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})).json()}
 async function ask(){const v=qi.value.trim();if(!v)return;qi.value='';await Po('/think',{q:v});poll()}
+async function falar(){const v=ti.value.trim();if(!v)return;ti.value='';btf.textContent='…';await Po('/falar',{tema:v});btf.textContent='falar';poll()}
 async function upl(){const fl=f.files[0];if(!fl)return;const r=new FileReader();r.onload=async()=>{await Po('/see',{img:r.result});poll()};r.readAsDataURL(fl)}
 async function toggleAuto(){autoOn=!autoOn;await Po('/auto',{on:autoOn});poll()}
 async function teachNow(){await Po('/auto',{now:1});setTimeout(poll,500)}
@@ -637,6 +694,7 @@ class H(BaseHTTPRequestHandler):
             if d.get("every"): C.auto_every=max(10,int(d["every"]))
             if d.get("now"): threading.Thread(target=C._autoteach,daemon=True).start()   # forçar 1 ciclo já
             r=dict(auto=C.auto,every=C.auto_every)
+        elif s.path=="/falar": r=C.falar(d.get("tema","")) if C.ready else dict(say="acordando…")   # voz byte-nativa (fluxo+fala)
         else: r={"err":1}
         s._j(r)
 if __name__=="__main__":

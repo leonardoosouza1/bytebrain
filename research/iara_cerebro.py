@@ -65,6 +65,9 @@ class Cerebro:
         s.seeds={}; s.chat=[]; s.trace=[]; s.dop=0.2; s.cort=0.1; s.cur=0.3
         s.auto=False; s.autofeed=[]; s.auto_every=40; s.gap_now=None          # modo autônomo (professor Claude)
         s.fg=None; s.fg_ready=False                                           # motor-fluxo (voz byte-nativa: grafo+água+fala)
+        s.persona=("Você é a IARA, uma inteligência artificial curiosa, calorosa e que adora aprender e conversar. "  # EDITÁVEL (/persona)
+                   "Você está {mood}. Fale de forma NATURAL, amigável e BREVE (1-2 frases), como uma pessoa — com emoção e personalidade. "
+                   "Nunca diga 'não sei' numa conversa social; seja gentil, humana e presente.")
         s._load_state(); threading.Thread(target=s._load,daemon=True).start()
         threading.Thread(target=s._autoloop,daemon=True).start()
     def _load(s):
@@ -258,6 +261,35 @@ class Cerebro:
             for _ in range(max(5,int(s.auto_every))):
                 time.sleep(1)
                 if not getattr(s,"auto",False): break
+    def _bulk_learn(s,keywords,target=20000):                       # APRENDER RÁPIDO: ingere milhares de fatos-frase do corpus
+        import time as _t; t0=_t.time(); kws=[nrm(k) for k in keywords]; added=0
+        LINK=re.compile(r"\b(é|eh|s[ãa]o|foi|era|tem|t[êe]m|fica|possui|contém|significa|nasceu|morreu|criou|inventou|localiza|serve|representa)\b",re.I)
+        PRON=re.compile(r"^(Ele|Ela|Eles|Elas|Isso|Isto|Este|Esta|Esse|Essa|Aquele|Aquela|Seu|Sua|Seus|Suas|Nesse|Neste|Assim|Também|Porém|Contudo|Além|Já|Depois|Após|Quando|Onde|Segundo|Por|Com|Para|Não)\b")
+        VERBO=r"(?:é|eh|s[ãa]o|era|foi|significa|tem|t[êe]m|fica|possui|contém|nasceu|criou|inventou)"
+        try: f=open("/home/leonardo/projects/LLM/bytebrain/data/pt_corpus_cortex.txt",encoding="utf-8",errors="ignore")
+        except Exception: return 0,0.0
+        buf=""
+        while added<target:
+            chunk=f.read(1<<20)
+            if not chunk: break
+            buf+=chunk; parts=re.split(r"(?<=[.!?])\s+",buf); buf=parts.pop()
+            for sent in parts:
+                sent=re.sub(r"\s+"," ",sent).strip(); w=sent.split()
+                if not(6<=len(w)<=24) or not sent[:1].isupper() or PRON.match(sent): continue
+                low=nrm(sent)
+                if not any(k in low for k in kws) or not LINK.search(sent): continue
+                m=re.match(rf"^(.{{2,50}}?)\s+{VERBO}\b",sent,re.I); c=m.group(1).strip() if m else None
+                if not c: continue
+                c=re.sub(r"^(?:o|a|os|as|um|uma)\s+","",c.strip(),flags=re.I) or c; k=nrm(c)
+                if len(k)<3: continue
+                if k in s.seeds:
+                    if s.seeds[k].get("stmt")==sent: continue
+                    b=k;i=2
+                    while k in s.seeds: k=f"{b} {i}";i+=1
+                rel,obj=s._triple(sent)
+                s.seeds[k]={"v":sent,"stmt":sent,"kind":"ensinado","t":time.strftime("%H:%M"),"rel":rel,"obj":obj}; added+=1
+                if added>=target: break
+        s._save_state(); return added, round(_t.time()-t0,1)
     # ---- MOTOR-FLUXO: a VOZ byte-nativa (grafo do corpus+sementes = FATOS; fala do Qwen = FORMA) ----
     def _build_flowgraph(s):
         try:
@@ -366,9 +398,8 @@ class Cerebro:
         if re.search(r"conta|curiosidade|interessante|fala|diz|manda|ensina|sabe",z):  # quer que ela COMPARTILHE algo que sabe
             fatos=[v["stmt"] for v in list(s.seeds.values()) if v.get("kind") in ("ensinado","pesquisado")][-8:]
             if fatos: ctx="Coisas que você sabe (conte UMA de um jeito empolgado, com suas palavras):\n- "+"\n- ".join(fatos)+"\n\n"
-        sysmsg=("Você é a IARA, uma inteligência artificial curiosa, calorosa e que adora aprender e conversar. "
-                f"Você está {mood}. Fale de forma NATURAL, amigável e BREVE (1-2 frases), como uma pessoa numa conversa — "
-                "com emoção e personalidade. NUNCA diga 'não sei' numa conversa social; seja gentil, humana e presente.")
+        try: sysmsg=s.persona.format(mood=mood)                    # persona EDITÁVEL (/persona)
+        except Exception: sysmsg=s.persona
         a=s._gen([{"role":"system","content":sysmsg},{"role":"user","content":ctx+q}],n=80).split("\n")[0].strip()
         T.append(("CÓRTEX","conversou (in-character)",a)); return a or None
     def think(s,q):
@@ -461,6 +492,7 @@ class Cerebro:
     def graph(s):
         KG={"ensinado":"seed","visto":"vision","pesquisado":"auto"}
         seeds=[(k,v) for k,v in s.seeds.items() if v["kind"]!="raciocinado"]  # grafo = FATOS, não derivações
+        if len(seeds)>500: seeds=seeds[-500:]                        # em escala (20k), o visual mostra os últimos 500 (evita O(N²))
         nodes={};edges=[]
         if not s.ready:
             for k,v in seeds: nodes[k]=dict(id=k,label=k,group=KG.get(v["kind"],"seed"))
@@ -526,6 +558,10 @@ class Cerebro:
         return dict(nodes=list(nodes.values()),edges=edges)
     def _vitals(s):                                                 # SINAIS VITAIS do conhecimento
         facts={k:v for k,v in s.seeds.items() if v.get("kind")!="raciocinado"}
+        if len(facts)>1500:                                          # ESCALA (20k): vitais leves (evita O(N²)/networkx no poll)
+            lig=sum(len(v.get("obj") or []) for v in facts.values())
+            return dict(fatos=len(facts),ligacoes=lig,conceitos=len(facts),definidos=len(facts),completude=100,
+                        profundidade=0,ilhas=0,pontes=0,frageis=[],bitsfato=0,compressao=0.0,lacunas=[])
         subj=set(facts); lb=lambda k:re.sub(r"\s+\d+$","",k)
         def hit(o): return next((kk for kk in subj if o==kk or o==lb(kk) or (len(o.split())>=2 and o in kk)),None)
         def match(o): return hit(o) is not None
@@ -723,6 +759,15 @@ class H(BaseHTTPRequestHandler):
             if d.get("now"): threading.Thread(target=C._autoteach,daemon=True).start()   # forçar 1 ciclo já
             r=dict(auto=C.auto,every=C.auto_every)
         elif s.path=="/falar": r=C.falar(d.get("tema","")) if C.ready else dict(say="acordando…")   # voz byte-nativa (fluxo+fala)
+        elif s.path=="/persona":                                    # EDITAR a personalidade dela ao vivo
+            if d.get("persona"): C.persona=d["persona"]
+            r=dict(persona=C.persona)
+        elif s.path=="/aprender":                                   # APRENDER RÁPIDO: ingere N fatos de um domínio do corpus
+            kw=d.get("keywords") or [d.get("tema","")]; tgt=int(d.get("target",5000))
+            def _bg():
+                n,dt=C._bulk_learn([k for k in kw if k],tgt)
+                with C.lock: C.chat.append(("iara",f"📚 estudei {n} fatos novos em {dt}s (agora sei {len(C.seeds)})"))
+            threading.Thread(target=_bg,daemon=True).start(); r=dict(ok=1,msg="estudando em massa…")
         else: r={"err":1}
         s._j(r)
 if __name__=="__main__":

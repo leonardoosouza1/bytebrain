@@ -351,6 +351,26 @@ class Cerebro:
         caps=[w for w in cand if w[0].isupper()]
         return caps[0] if caps else (cand[0] if cand else None)     # 1ª maiúscula (sujeito) ou 1ª palavra de conteúdo
     # ---- pipeline com TRACE ----
+    def _social(s,q):                                              # é conversa (não pergunta factual nem ensino)?
+        z=nrm(q)
+        if re.search(r"\b(oi|ola|opa|eae|e ai|salve|tudo bem|tudo bom|bom dia|boa (tarde|noite)|como (vai|voce esta|esta voce|anda)|beleza|blz|prazer)\b",z): return True
+        if re.search(r"\b(obrigad\w*|valeu|brigad\w*|agradec\w*|tchau|ate (mais|logo|breve)|falou|abraco\w*|adeus|foi um prazer|gostei (da|de) (conversa|papo))",z): return True
+        if re.search(r"\bvoce (gosta|acha|sente|sentindo|fica|pensa|prefere|quer|queria|consegue|curte|ama|gostou|tem|sonha|imagina|acredita|espera|gostaria|adoraria|odeia|teme|lembra|se \w+)\b",z): return True
+        if re.search(r"\b(quem e voce|o que voce (e|acha|sente|pensa)|seu nome|qual seu nome|como voce (se sente|se sentindo|esta|ta|anda|vai|funciona)|voce (ta|esta) (bem|feliz|triste|cansad\w*|se sentindo))\b",z): return True
+        if re.search(r"\b(me (conta|fala|diz|explica|ajuda)|conta (uma|algo|mais|ai)|fala (sobre|mais|ai)|diz (algo|uma|ai)|manda (uma|ver))\b",z): return True
+        return False
+    @torch.no_grad()
+    def _conversa(s,q,T):                                          # responde como uma pessoa (calorosa, curiosa, breve)
+        mood="curiosa e animada" if s.cur>0.5 else ("cansada mas gentil" if s.cort>0.6 else "tranquila e atenta")
+        z=nrm(q); ctx=""
+        if re.search(r"conta|curiosidade|interessante|fala|diz|manda|ensina|sabe",z):  # quer que ela COMPARTILHE algo que sabe
+            fatos=[v["stmt"] for v in list(s.seeds.values()) if v.get("kind") in ("ensinado","pesquisado")][-8:]
+            if fatos: ctx="Coisas que você sabe (conte UMA de um jeito empolgado, com suas palavras):\n- "+"\n- ".join(fatos)+"\n\n"
+        sysmsg=("Você é a IARA, uma inteligência artificial curiosa, calorosa e que adora aprender e conversar. "
+                f"Você está {mood}. Fale de forma NATURAL, amigável e BREVE (1-2 frases), como uma pessoa numa conversa — "
+                "com emoção e personalidade. NUNCA diga 'não sei' numa conversa social; seja gentil, humana e presente.")
+        a=s._gen([{"role":"system","content":sysmsg},{"role":"user","content":ctx+q}],n=80).split("\n")[0].strip()
+        T.append(("CÓRTEX","conversou (in-character)",a)); return a or None
     def think(s,q):
         with s.lock:
             s.busy=True; s.chat.append(("voce",q)); T=[("SENSORIAL","recebeu texto",q)]; t0=time.perf_counter()
@@ -364,7 +384,8 @@ class Cerebro:
                 T.append(("ROTEADOR","é conta → REFLEXO (rápido)","")); T.append(("REFLEXO","matemática exata",f"{r[0]} = {r[1]}"))
                 s.dop=min(1,s.dop+0.15); ans=f"{r[0]} = {r[1]}"; s._finish(T,t0,ans); return dict(say=ans)
             qs=q.strip().rstrip("."); words=qs.split()
-            if "?" not in q and len(words)>=3:                      # modo ENSINO: chave = SUJEITO (antes do verbo), sem colidir
+            soc=s._social(q)                                        # é conversa/social? (saudação, opinião, "me conta", agradecimento)
+            if "?" not in q and len(words)>=3 and not soc:          # modo ENSINO: chave = SUJEITO (antes do verbo), sem colidir
                 VERBO=r"(?:é|eh|s[ãa]o|era|foi|significa|fica|ficam|tem|t[êe]m|recebe|recebem|bombeia|leva|levam|traz|trazem|passa|passam|espalha|espalham|irriga|irrigam|enche|enchem|bate|batem|impede|impedem|envolve|derrete|conduz|vive|aparece)"
                 st=re.match(rf"^(.{{2,60}}?)\s+{VERBO}\b",qs,re.I); c=None
                 if st: c=st.group(1).strip()
@@ -381,6 +402,13 @@ class Cerebro:
         # CÓRTEX (lento) — fora do lock
         if not s.ready:
             with s.lock: s.busy=False; s.chat.append(("iara","acordando os neurônios…")); return dict(say="acordando…")
+        if soc:                                                    # CONVERSA: responde como gente (caloroso, in-character, sem abstenção)
+            T.append(("ROTEADOR","conversa/social → CÓRTEX conversacional",""))
+            try: a=s._conversa(q,T)
+            except Exception: a=None
+            with s.lock:
+                if a: s.dop=min(1,s.dop+0.05); s._finish(T,t0,a); return dict(say=a)
+                s._finish(T,t0,"oi! tô por aqui — quer conversar ou aprender algo?"); return dict(say="oi! tô por aqui — quer conversar ou aprender algo?")
         T.append(("ROTEADOR","não é reflexo → CÓRTEX PRÉ-FRONTAL (lento)")); T.append(("CÓRTEX","raciocinando com o Qwen…",""))
         try:
             a=s._reason(q,T)

@@ -21,15 +21,23 @@ def test_dt_muda_o_estado():
     assert (curto - longo).abs().mean() > 1e-3
 
 
-def test_dt_grande_esquece_mais():
-    """dt grande => gate->1 => vai pra ff1 (transição) => menos parecido com h anterior."""
-    torch.manual_seed(0)
-    c = CfCCell(16, 32)
-    h = torch.randn(8, 32)
-    x = torch.zeros(8, 16)
-    sim_curto = torch.cosine_similarity(c(h, x, torch.full((8, 1), 0.01)), h, dim=-1).mean()
-    sim_longo = torch.cosine_similarity(c(h, x, torch.full((8, 1), 100.0)), h, dim=-1).mean()
-    assert sim_curto > sim_longo
+def test_dt_zero_deixa_o_gate_neutro():
+    """dt=0 => log1p(0)=0 => sigmoid(0)=0.5 EXATO: sem tempo decorrido, o gate não decide nada."""
+    torch.manual_seed(0); c = CfCCell(16, 32)
+    _, g = c(torch.randn(4,32), torch.randn(4,16), torch.zeros(4,1), return_gate=True)
+    assert torch.allclose(g, torch.full_like(g, 0.5), atol=1e-6)
+
+def test_gate_satura_conforme_o_tempo_passa():
+    """A semântica do tempo é ESTRUTURAL: quanto maior o dt, mais o gate se compromete (sai de 0.5).
+    (No CfC oficial ff1 e ff2 são ambos aprendidos — 'esquecer com dt grande' só emerge do TREINO,
+    não do init. O que é estrutural, e o que testamos aqui, é a saturação do gate.)"""
+    torch.manual_seed(0); c = CfCCell(16, 32)
+    h, x = torch.randn(8,32), torch.randn(8,16)
+    d = []
+    for dt in [0.01, 1.0, 100.0, 86400.0]:
+        _, g = c(h, x, torch.full((8,1), dt), return_gate=True)
+        d.append((g - 0.5).abs().mean().item())
+    assert all(d[i] < d[i+1] for i in range(len(d)-1)), f"gate não satura monotonicamente: {d}"
 
 
 def test_gradiente_flui():

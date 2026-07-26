@@ -1,0 +1,12 @@
+TaskbarHero.TBHSavedLanguageSelector::GetStartupLocale
+TaskbarHero.AccountSaveData::GetLastExitSteamUnixSec
+TaskbarHero.AccountSaveData::SetLastExitSteamUnixSec
+TaskbarHero.CommonSaveData::SetFirstUnlockHeroKey
+TaskbarHero.CommonSaveData::SetTutorialCleared
+TaskbarHero.CommonSaveData::IsTutorialCleared
+TaskbarHero.PlayerSaveData::PostLoad
+TaskbarHero.PlayerSaveData::PreSave
+TaskbarHero.EasySaveData.ItemSaveData::ToString
+TaskbarHero.EasySaveData.ItemSaveData::IsValid
+TaskbarHero.EasySaveData.PendingEnchantSaveData::IsValid
+TaskbarHero.EasySaveData.PendingEnchantSaveData::ToString

@@ -14,5 +14,10 @@ def test_split_nao_vaza_entidade():
 def test_sessoes_tem_dt_variado():
     g = load_graph("research/iara_cerebro_state.json")
     ss = make_sessions(g, seed=0)
-    dts = [s.dt_seconds for sess in ss for s in sess.steps]
-    assert min(dts) < 60 and max(dts) > 86400   # segundos ATÉ dias
+    # Separate within-session gaps (i > 0) from between-session gaps (i == 0)
+    within_session_dts = [sess.steps[i].dt_seconds for sess in ss for i in range(1, len(sess.steps))]
+    between_session_dts = [sess.steps[0].dt_seconds for sess in ss]
+    # Within-session gaps should be short (< 60s)
+    assert min(within_session_dts) < 60, "within-session gaps must be < 60s"
+    # Between-session gaps should be long (> 86400s = 1d)
+    assert max(between_session_dts) > 86400, "between-session gaps must span > 1d"

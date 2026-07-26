@@ -1,5 +1,5 @@
-import json, random, time
-from dataclasses import dataclass, field
+import json, random
+from dataclasses import dataclass
 
 @dataclass
 class Fact:
@@ -17,7 +17,8 @@ class Graph:
         return d
 
 def load_graph(path, min_strength=0.0, drop_bulk=False):
-    raw = json.load(open(path))
+    with open(path) as f:
+        raw = json.load(f)
     seeds = raw.get("seeds", raw)
     out = []
     for k, v in seeds.items():
@@ -52,7 +53,7 @@ class Session:
 def make_sessions(g, seed=0, n_sessions=4000, len_range=(3, 12)):
     """Sequências com dt REAL variado: dentro da sessão segundos-minutos; entre sessões horas-dias.
     Inclui REPETIÇÃO ESPAÇADA (o mesmo fato volta depois) — é o sinal que só o tempo resolve."""
-    rng = random.Random(seed); byent = g.by_entity(); ents = list(byent)
+    rng = random.Random(seed); byent = g.by_entity(); ents = sorted(byent)
     out = []
     for _ in range(n_sessions):
         e = rng.choice(ents); fs = byent[e]

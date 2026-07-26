@@ -55,3 +55,31 @@ def test_divide_por_grau_reduz_hub(sub):
         hub_com = m.soft_scores(q, by_degree=True).argmax().item()
         hub_sem = m.soft_scores(q, by_degree=False).argmax().item()
     assert m.degree[hub_com] <= m.degree[hub_sem]
+
+
+def test_cache_identidade_no_treinamento(sub):
+    """Guard the ANCE-style cache: same tensor object is returned within the refresh window,
+    a different one is returned after invalidate_cache(), and a different one after
+    refresh_every calls (periodic rebuild)."""
+    m = WaterMemory(sub, ByteEncoder(d=32), d=32, refresh_every=3)
+    m.train()
+
+    # First call: builds the cache
+    e0 = m.fact_embeddings()
+
+    # Second call: must be the SAME object (cache hit)
+    e1 = m.fact_embeddings()
+    assert e0 is e1, "segundo call deveria retornar o mesmo tensor (cache hit)"
+
+    # Third call: still within refresh_every=3, same object
+    e2 = m.fact_embeddings()
+    assert e0 is e2, "terceiro call ainda dentro da janela, deve ser cache hit"
+
+    # Fourth call: refresh_every=3 elapsed, must rebuild → DIFFERENT object
+    e3 = m.fact_embeddings()
+    assert e0 is not e3, "após refresh_every calls, cache deve ser reconstruído (objeto novo)"
+
+    # invalidate_cache() forces a rebuild on the very next call
+    m.invalidate_cache()
+    e4 = m.fact_embeddings()
+    assert e3 is not e4, "invalidate_cache() deve forçar rebuild (objeto novo)"

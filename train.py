@@ -111,12 +111,6 @@ def main():
     if a.quant_bits > 0:
         print(f"⚡ quant-aware activations: {a.quant_bits}-bit per-channel (byte-neuron)", flush=True)
     opt = torch.optim.AdamW(model.parameters(), a.lr, weight_decay=a.wd)
-    if a.compile:
-        try:
-            model = torch.compile(model)
-            print("torch.compile ativo", flush=True)
-        except Exception as e:                      # compile e' otimizacao, nao requisito
-            print(f"torch.compile falhou ({str(e)[:80]}) - seguindo em eager", flush=True)
     FACT_IDX = build_fact_index(TR) if a.fact_boost > 0 else None
     scaler = torch.amp.GradScaler("cuda", enabled=a.amp)
     step, best_val, elapsed_prev = 0, 1e9, 0.0
@@ -136,9 +130,16 @@ def main():
 
     t_start = time.time()
 
+    if a.compile:                       # DEPOIS do resume: compilar antes prefixa as chaves com _orig_mod.
+        try:
+            model = torch.compile(model)
+            print("torch.compile ativo", flush=True)
+        except Exception as e:          # compile e' otimizacao, nao requisito
+            print(f"torch.compile falhou ({str(e)[:80]}) - seguindo em eager", flush=True)
+
     def save(tag):
         atomic_save({
-            "model": model.state_dict(), "opt": opt.state_dict(), "step": step,
+            "model": getattr(model, "_orig_mod", model).state_dict(), "opt": opt.state_dict(), "step": step,
             "best_val": best_val, "elapsed": elapsed_prev + (time.time() - t_start),
             "torch_rng": torch.get_rng_state(), "np_rng": np.random.get_state(),
             "config": {"dim": a.dim, "layers": a.layers, "heads": a.heads, "ctx": a.ctx, "quant_bits": a.quant_bits},

@@ -29,8 +29,38 @@ def atomic_save(obj, path):
     os.replace(tmp, path)
 
 
-def get_batch(data, bs, L, device):
-    ix = np.random.randint(0, len(data) - L - 1, bs)
+# padrões relacionais: onde a Wikipédia afirma um FATO. Um circuito fato só se forma
+# com MUITAS exposições — superamostrar estas posições ataca isso sem gastar mais compute.
+FACT_PATTERNS = [p.encode("utf-8") for p in (
+    " é a capital", " é capital", " tem como capital", " é a sede",
+    " é um município", " é uma cidade", " é um país", " é um estado",
+    " localiza-se", " situa-se em", " fica no", " fica na",
+    " nasceu em", " morreu em", " faleceu em", " foi fundad", " foi criad",
+    " é o maior", " é a maior", " pertence a", " é filho de", " é conhecido como",
+)]
+
+
+def build_fact_index(data, patterns=FACT_PATTERNS, cap=400_000):
+    """Varre o corpus uma vez e guarda onde há afirmação de fato. Custa ~1 min, vale para sempre."""
+    import re
+    raw = np.asarray(data).tobytes()
+    hits = []
+    for p in patterns:
+        hits.extend(m.start() for m in re.finditer(re.escape(p), raw))
+        if len(hits) > cap:
+            break
+    hits = np.array(sorted(set(hits)), dtype=np.int64)
+    print(f"fact-index: {len(hits)} ocorrencias de relacao no corpus", flush=True)
+    return hits
+
+
+def get_batch(data, bs, L, device, fact_idx=None, fact_frac=0.0):
+    n_fact = int(bs * fact_frac) if fact_idx is not None and len(fact_idx) else 0
+    ix = np.random.randint(0, len(data) - L - 1, bs - n_fact)
+    if n_fact:
+        # centra a janela no fato: ele fica no meio, com contexto antes e depois
+        picks = fact_idx[np.random.randint(0, len(fact_idx), n_fact)] - L // 2
+        ix = np.concatenate([ix, np.clip(picks, 0, len(data) - L - 2)])
     x = np.stack([np.asarray(data[i:i + L + 1]) for i in ix]).astype(np.int64)
     return torch.from_numpy(x).to(device)
 
@@ -56,6 +86,9 @@ def main():
     ap.add_argument("--ul-window", type=int, default=16)
     ap.add_argument("--checkpoint", action="store_true", help="gradient checkpointing (fit bigger models)")
     ap.add_argument("--amp", action="store_true", help="fp16 mixed precision (RDNA2 fp16 = 2x fp32)")
+    ap.add_argument("--compile", action="store_true", help="torch.compile: ~1.5x medido (funde ops memory-bound)")
+    ap.add_argument("--fact-boost", type=float, default=0.0,
+                    help="fracao do batch amostrada em posicoes com relacao (ex: 0.3). 0 = desligado")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--quant-bits", type=int, default=0,
                     help="N-bit quant-aware activations (byte-neuron experiment); 0 = float")
@@ -78,6 +111,13 @@ def main():
     if a.quant_bits > 0:
         print(f"⚡ quant-aware activations: {a.quant_bits}-bit per-channel (byte-neuron)", flush=True)
     opt = torch.optim.AdamW(model.parameters(), a.lr, weight_decay=a.wd)
+    if a.compile:
+        try:
+            model = torch.compile(model)
+            print("torch.compile ativo", flush=True)
+        except Exception as e:                      # compile e' otimizacao, nao requisito
+            print(f"torch.compile falhou ({str(e)[:80]}) - seguindo em eager", flush=True)
+    FACT_IDX = build_fact_index(TR) if a.fact_boost > 0 else None
     scaler = torch.amp.GradScaler("cuda", enabled=a.amp)
     step, best_val, elapsed_prev = 0, 1e9, 0.0
 
@@ -131,7 +171,7 @@ def main():
             opt.zero_grad(set_to_none=True)
             mean_loss = 0.0
             for _ in range(a.accum):                          # gradient accumulation -> larger effective batch
-                xb = get_batch(TR, a.batch, a.ctx, DEV)
+                xb = get_batch(TR, a.batch, a.ctx, DEV, FACT_IDX, a.fact_boost)
                 with torch.autocast("cuda", dtype=torch.float16, enabled=a.amp):
                     logits = model(xb[:, :-1])
                     tgt = xb[:, 1:]

@@ -194,3 +194,31 @@ Fast battery defaults: 200 facts, 2000 questions, eval and sleep every 100,
 sleep 8 steps x 16, arms wake, random, always, wake_replay, sleep_uniform,
 sleep_fading. Predictions of the sleep section stand, with references re-run
 in the same battery (wake, always, random) instead of the old numbers.
+
+# Results — lane battery (2026-10-13 16:14-17:02, fixed held-out)
+
+`lanes_learning.py --seeds 0,1,2 --random`, 200 facts, 2000 questions.
+Artefacts: `/media/llm-data/universe-runs/sleep-fast-20261013/lanes/`.
+Wall time: 2394 s (15 lanes) + 476 s (3 random lanes) = 48 min; lane gate
+measured 2.75x cheaper per lane than one lane alone.
+
+Final held-out (seed 0 / 1 / 2), item-gradients, relearned fraction:
+
+| arm | held-out | item-grads | relearned |
+|---|---|---|---|
+| always | 0.933 / 0.974 / 0.978 | 8000 | - |
+| wake | 0.870 / 0.905 / 0.822 | ~2900 | 0.40-0.43 |
+| random | 0.466 / 0.521 / 0.503 | same as wake | 0.41-0.44 |
+| wake_replay | 0.922 / 0.905 / 0.951 | ~4800 | 0.19-0.24 |
+| sleep_uniform | 0.990 / 0.974 / 0.981 | ~4850 | 0.19-0.22 |
+| sleep_fading | 0.956 / 0.955 / 0.876 | ~3060 | 0.23-0.25 |
+
+Verdicts:
+1. FAIL. Order was sleep_uniform > sleep_fading, not the reverse (3/3).
+   sleep_uniform > wake_replay at equal item-gradients in 3/3: the gain is
+   from offline rehearsal, not from more replay alone.
+2. Borderline: sleep_fading relearned 0.23-0.25 (target < 0.25).
+3. 2/3: sleep_fading >= 0.95 x always with ~38% of its item-gradients in
+   seeds 0 and 1; seed 2 reached 0.90.
+4. NOT MEASURED (per-sleep cost trend not analysed).
+Stress vs random with clean held-out: +40 / +38 / +32 points (3/3).

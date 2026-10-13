@@ -158,3 +158,39 @@ Per seed 4 arms; each arm costs about one `stress` arm (~25-35 min with two
 seeds in parallel) plus up to 400 sleep steps. Estimate ~2-2.5 h wall time for
 3 seeds. GPU memory: same as the stress battery (two processes in parallel fit).
 Disk: a few MB of JSON.
+
+---
+
+# Erratum (2026-10-13 15:15) — held-out paraphrases leaked into the stream
+
+`make_stream` drew the paraphrase as `randrange(3)` and the encoder used it
+directly as the paraphrase index, instead of mapping it through the fact's
+`train_para`. In the stress battery, seed 0, **2091 of 5000 stream questions
+(42%) used a paraphrase listed as held out**, touching 330 of 462 seen facts.
+
+Consequences for the results above:
+- "held-out" accuracy was partly measured on paraphrases the model trained on;
+  it is not a clean generalization measure.
+- arm comparisons (stress vs random vs always vs never) share the same leak, so
+  the ranking and prediction 2 remain valid as comparisons; absolute held-out
+  numbers and the stress/always ratio must be re-measured.
+
+Fix: `train_paraphrases(facts, stream)` in `stress_learning.py`, used by all
+three scripts. The sleep battery and any re-run use the fixed stream.
+
+# Fast engine (phase 1) — not yet run
+
+`fast_learning.py` keeps the per-question semantics and changes execution only:
+GPU token table, scoring window cut at the first training trigger, answer-only
+logits, `always` served from its own training forward, batched eval. Optional
+`--dtype fp16` (fp16 frozen base, fp32 LoRA, fp32 answer logits).
+
+Gate before any battery: `check_equivalence.py` (old sequential loop vs fast,
+same facts/stream, 300 questions). Pass = identical event list, max |dS| < 1e-3,
+no theta flips. Then the fp16 gate: same script with `--dtype fp16`
+(pass = max |dS| < 0.02, flips only near theta).
+
+Fast battery defaults: 200 facts, 2000 questions, eval and sleep every 100,
+sleep 8 steps x 16, arms wake, random, always, wake_replay, sleep_uniform,
+sleep_fading. Predictions of the sleep section stand, with references re-run
+in the same battery (wake, always, random) instead of the old numbers.

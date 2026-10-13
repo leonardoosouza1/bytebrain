@@ -4,7 +4,7 @@ import glob
 import json
 import sys
 
-PATHS = sorted(glob.glob("/media/llm-data/universe-runs/sleep-learning-20261013/full/seed*.log"))
+PATHS = sorted(glob.glob("/media/llm-data/universe-runs/sleep-fast-20261013/full/seed*.log"))
 
 latest = {}
 for line in (l.strip() for p in (sys.argv[1:] or PATHS) for l in open(p)):

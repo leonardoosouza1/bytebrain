@@ -36,7 +36,8 @@ import torch
 from transformers import AutoTokenizer
 
 from stress_learning import (MODEL, Encoder, answer_stats, evaluate, load_model,
-                             make_facts, make_stream, train_step)
+                             make_facts, make_stream, train_paraphrases,
+                             train_step)
 
 ARMS = ("wake", "wake_replay", "sleep_uniform", "sleep_fading")
 
@@ -195,12 +196,13 @@ def main():
     os.makedirs(args.out, exist_ok=True)
     rng = random.Random(args.seed)
     facts = make_facts(rng, args.facts)
-    stream = make_stream(rng, args.facts, args.questions, args.zipf)
+    raw_stream = make_stream(rng, args.facts, args.questions, args.zipf)
     if args.reference_setup:
         with open(args.reference_setup) as fh:
             ref = json.load(fh)
-        assert ref["facts"] == facts and [tuple(x) for x in ref["stream"]] == stream, \
+        assert ref["facts"] == facts and [tuple(x) for x in ref["stream"]] == raw_stream, \
             "facts/stream differ from the stress battery reference"
+    stream = train_paraphrases(facts, raw_stream)
     with open(os.path.join(args.out, f"seed{args.seed}_setup.json"), "w") as fh:
         json.dump({"args": vars(args), "facts": facts, "stream": stream}, fh)
 

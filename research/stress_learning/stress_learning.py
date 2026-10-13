@@ -99,6 +99,15 @@ def make_stream(rng, n_facts, n_questions, zipf_s):
     return stream
 
 
+def train_paraphrases(facts, stream):
+    """Map the stream's paraphrase slot (0-2) to the fact's own train paraphrase.
+
+    Until 2026-10-13 the slot was used directly as the paraphrase index, so
+    ~42% of stream questions used a paraphrase listed as held out.
+    """
+    return [(f, facts[f]["train_para"][k]) for f, k in stream]
+
+
 class Encoder:
     def __init__(self, tok, facts, device):
         self.tok, self.facts, self.device = tok, facts, device
@@ -332,7 +341,7 @@ def main():
     device = "cuda"
     rng = random.Random(args.seed)
     facts = make_facts(rng, args.facts)
-    stream = make_stream(rng, args.facts, args.questions, args.zipf)
+    stream = train_paraphrases(facts, make_stream(rng, args.facts, args.questions, args.zipf))
     with open(os.path.join(args.out, f"seed{args.seed}_setup.json"), "w") as fh:
         json.dump({"args": vars(args), "facts": facts, "stream": stream}, fh)
 

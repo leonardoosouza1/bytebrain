@@ -106,3 +106,55 @@ Observed, not predicted:
 
 Next lever: consolidation against forgetting (batched "sleep" replay, or
 updating only the fact's neuron territory).
+
+---
+
+# Sleep consolidation (pre-registered 2026-10-13, not yet run)
+
+Script: `sleep_learning.py`. Runner: `run_sleep.sh`. Live view: `watch_sleep.py`.
+
+## Question
+
+Stress picks *what* to learn well, but 43-48% of stressed facts were forgotten
+and relearned. Does an offline "sleep" phase, rehearsing what was learned while
+awake, cut that forgetting? Is any gain from sleep itself or just from more replay?
+
+## Arms (seeds 0-2, same facts and stream as the stress battery, checked by assert)
+
+Wake is identical in all arms: the calibrated stress rule
+(`lr = 1e-4 * min(S/0.5, 3)`, max 3 steps, stop at S < 0.2, 3 replay items).
+
+| arm | what it does |
+|---|---|
+| `wake` | wake only; re-run of `stress` with this code |
+| `wake_replay` | wake only, 7 replay items per step instead of 3; spends about as many item-gradients as `sleep_uniform` |
+| `sleep_uniform` | every 250 questions: 20 steps x 16 facts drawn uniformly from the learned buffer |
+| `sleep_fading` | every 250 questions: score S of every learned fact on one train paraphrase; train only those with S > 0.3, weakest first, up to 20 x 16; pad the last batch uniformly; skip if none fade |
+
+Sleep lr is 1e-4. Eval runs **before** each sleep, so every arm is measured at
+the end of a wake period (no fresh-rehearsal bonus); there is no sleep after
+question 5000. Cost is counted in item-gradients (items per training step,
+wake + sleep), plus forward-only scoring for `sleep_fading`.
+
+References from the stress battery (same seeds): `always` 0.912-0.935 held-out
+with 20 000 item-gradients (5000 steps x 4); `stress` 0.784-0.883 with ~7000.
+
+## Predictions
+
+1. Held-out order `sleep_fading` > `sleep_uniform` > `wake_replay` ~ `wake`,
+   in at least 2 of 3 seeds.
+2. `sleep_fading` relearned fraction < 0.25 (stress battery: 0.43-0.48).
+3. `sleep_fading` held-out >= 0.95 x `always` while spending <= 70% of its
+   item-gradients (<= 14 000).
+4. `sleep_fading` sleep cost falls over the stream (fewer fading facts per sleep
+   in the second half than in the first).
+
+If `wake_replay` ~ `sleep_uniform`, sleep is just more replay. If
+`sleep_fading` ~ `sleep_uniform`, stress-guided rehearsal adds nothing.
+
+## Budget
+
+Per seed 4 arms; each arm costs about one `stress` arm (~25-35 min with two
+seeds in parallel) plus up to 400 sleep steps. Estimate ~2-2.5 h wall time for
+3 seeds. GPU memory: same as the stress battery (two processes in parallel fit).
+Disk: a few MB of JSON.

@@ -186,18 +186,34 @@ Corpus index alone as generator (contexts capped at 8/16/32/48 bytes): parse 3.1
   40.25%. Prediction (repair >= fresh +10) FAILED: at equal budget, regenerating from the error = resampling.
   cands=4 run OOMed at mem-frac 0.3, requeued at 0.5.
 
+  cands=4 (4 candidates per repair attempt, best kept): repair 41.25% vs fresh 39.75%. FAILED too.
+
+  **Attribution of the jump (controls, test_b pass@1, same start ctrl3 24.6):**
+
+  | arm | change vs loc_ce | test_a | test_b | test_b @8 |
+  |---|---|---|---|---|
+  | loc_ce | - | 94.1 | **82.8** | 88.3 |
+  | A `--arm final` | truth = final output only (no per-line check) | 97.9 | 72.1 | 84.3 |
+  | B `--rounds 1 --steps 1500` | one round, same total steps | 99.8 | 41.8 | 52.3 |
+
+  => on-policy ITERATION is the main cause (+41 pp): generate -> run -> keep what is right -> train -> generate
+  again with the better model; each round proposes more correct bodies (round exact 0.10 -> 0.86).
+  Per-LINE truth adds +10.7 pp (SE ~2.2 pp at n=400): bodies that hit the final output by luck with a wrong
+  middle line teach the shortcut.
+  Diagnosis of loc_ce on test_b (3200 samples): exact 80.3% (self3 16.2%); first wrong line 0:2, **1:620**, 2:9.
+  Middle-line errors fell 2474 -> 620 but are still 98% of what is left (top: sort->double 41, square->negate 32).
+
   Lessons: (4) pointing at the error with unlikelihood HURTS (-33 pp on test_b vs plain CE on verified bodies);
   copying what is right teaches more than pushing away what is wrong. First loc version collapsed to exact 0.0
   after one round (UL weight 1, 90% of examples negative). (5) The law mask helps where the name length was trained
   and hurts on longer names when used at eval (forces a duplicate line); used only for PROPOSALS it is the lever.
-  (6) The 24.6 -> 82.8 jump is NOT yet attributed. Running controls (`run_ctrl_loc.sh`):
-  A `--arm final` = same loop but truth = final output only (no per-line check, like self3);
-  B `--rounds 1 --steps 1500` = same steps, no on-policy iteration. Then `diagnose` on loc_ce.
-  If A ~ loc_ce: per-line truth is not the cause; if B ~ loc_ce: iteration is not the cause.
+  (6) Recipe that works: verified on-policy rounds + per-line truth + law mask on proposals + train replay.
+  (7) Repairing from the error line = resampling at equal budget: the error location helps as a TRAINING filter,
+  not as a generation restart.
 
   Reproduce (R=/media/llm-data/universe-runs/bytebrain-pycode-20261022/synth):
   `locate.py train $R/ctrl3/ckpt/ckpt.pt --arm ce --law-mask --rounds 6 --steps 250 --out-ckpt $R/loc_ce/ckpt.pt`
   then `synth.py eval $R/loc_ce/ckpt.pt --split test_b --out ...` (eval without mask). Wall ~3 min train + 30 s eval.
-- Next: fill A/B attribution; if line-level truth + iteration holds, carry it to real Python (Coder-3B or bwrap
+- Next: more rounds (does it keep climbing past 6?); 4-primitive names (length generalization); carry it to real Python (Coder-3B or bwrap
   tests as the per-line judge); slow "pointer" state for position inside the task (the middle-line failure);
   capacity sweep 1M/3M/12M.

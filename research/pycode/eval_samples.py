@@ -127,7 +127,9 @@ def main():
     comp = []
     for h in hold:  # one prompt each; batched by 1 row (prompts differ)
         sig = h["clean"].split("\n")[0] + "\n"
-        row = g.generate(b"\n\n" + sig.encode(), 1, args.bytes, temp=args.temp)[0].cpu().numpy()
+        # a prompt longer than the context would index the position table out of range (GPU hardware fault)
+        prompt = (b"\n\n" + sig.encode())[-(g.ctx // 2):]
+        row = g.generate(prompt, 1, args.bytes, temp=args.temp)[0].cpu().numpy()
         src, term = cut_function(sig + bytes(row).decode("utf-8", "replace"))
         comp.append({"src": src, "terminated": term, "self_contained": h["self_contained"], **judge(src)})
     report["completion"] = summarize(comp)

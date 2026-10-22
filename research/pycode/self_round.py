@@ -15,7 +15,7 @@ import random
 
 import torch
 
-from eval_samples import ByteLM, CachedGen, cut_function
+from eval_samples import ByteLM, CachedGen, cut_function, judge
 
 D = "/media/llm-data/datasets/pycode"
 
@@ -33,6 +33,9 @@ def grade(src):
     loaded = {n.id for n in ast.walk(fn) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)}
     if params - loaded:
         return "unused_param"
+    lines = [l.strip() for l in src.split("\n")[1:] if len(l.strip()) > 8]
+    if len(lines) != len(set(lines)):
+        return "repeated_line"     # self-training narrows onto repeated lines (round 1 mirror: I(k=32) 4.8x real)
     return "ok"
 
 
@@ -48,6 +51,13 @@ def main():
     ap.add_argument("--repeat", type=int, default=4)
     ap.add_argument("--replay-mb", type=float, default=4.0)
     ap.add_argument("--mem-frac", type=float, default=0.3)
+    # population grade: the per-sample grade alone rewards the cheapest template (round 2: __init__ 43% vs real 12%)
+    ap.add_argument("--cap-per-name", type=int, default=0, help="max kept functions per def name (0 = off)")
+    ap.add_argument("--cap-per-line", type=int, default=0, help="reject if a body line is already in this many kept")
+    # proposal: prompt with training signatures (the task, not the body), --per-prompt attempts each
+    ap.add_argument("--sig-prompts", action="store_true")
+    ap.add_argument("--per-prompt", type=int, default=16)
+    ap.add_argument("--run-check", action="store_true", help="reject functions that close over builtins only but fail in bwrap")
     a = ap.parse_args()
     torch.cuda.set_per_process_memory_fraction(a.mem_frac)
     os.makedirs(a.out_dir, exist_ok=True)
@@ -55,11 +65,19 @@ def main():
     lm = ByteLM(a.ckpt)
     gen = CachedGen(lm)
     counts, good, seen = {}, [], set()
-    for r in range(a.n // a.batch):
+    name_n, line_n = {}, {}
+    if a.sig_prompts:
+        sigs = [f.split("\n")[0] + "\n" for f in corpus.decode().split("\n\n") if f.startswith("def ")]
+        sigs = [x for x in dict.fromkeys(sigs) if len(x) < gen.ctx // 2 - 4]
+        random.Random(7).shuffle(sigs)
+        jobs = [(x, a.per_prompt) for x in sigs[:a.n // a.per_prompt]]
+    else:
+        jobs = [("def ", a.batch)] * (a.n // a.batch)
+    for r, (head, k) in enumerate(jobs):
         torch.manual_seed(1000 + r)
-        out = gen.generate(b"\n\ndef ", a.batch, a.bytes, temp=a.temp).cpu().numpy()
+        out = gen.generate(b"\n\n" + head.encode(), k, a.bytes, temp=a.temp).cpu().numpy()
         for row in out:
-            src, term = cut_function("def " + bytes(row).decode("utf-8", "replace"))
+            src, term = cut_function(head + bytes(row).decode("utf-8", "replace"))
             g = grade(src)
             if g == "ok" and not term:
                 g = "no_end"
@@ -69,11 +87,25 @@ def main():
                 g = "copy"
             elif g == "ok" and src in seen:
                 g = "duplicate"
+            elif g == "ok" and a.run_check:
+                j = judge(src)
+                if j["names_ok"] and not j["runs"]:
+                    g = "run_fail"
+            name = src.split("(")[0][4:].strip()
+            body = {l.strip() for l in src.split("\n")[1:] if len(l.strip()) > 12}   # short lines (else:) are normal
+            if g == "ok" and a.cap_per_name and name_n.get(name, 0) >= a.cap_per_name:
+                g = "name_capped"
+            elif g == "ok" and a.cap_per_line and any(line_n.get(l, 0) >= a.cap_per_line for l in body):
+                g = "line_capped"
             counts[g] = counts.get(g, 0) + 1
             if g == "ok":
+                name_n[name] = name_n.get(name, 0) + 1
+                for l in body:
+                    line_n[l] = line_n.get(l, 0) + 1
                 seen.add(src)
                 good.append(src)
-        print(f"round {r}: {counts}", flush=True)
+        if r % 16 == 0 or r == len(jobs) - 1:
+            print(f"round {r}: {counts}", flush=True)
     funcs = [f for f in corpus.decode().split("\n\n") if f.strip()]
     random.Random(0).shuffle(funcs)
     replay, size = [], 0

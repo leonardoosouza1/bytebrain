@@ -19,7 +19,7 @@ def main():
     law = LineLaw([f for f in split_funcs(f"{D}/clean_train.txt") if f.strip()])
     table = np.load(TP.TABLE)
     rows = []
-    for arm in ("real", "clean", "raw", "small"):
+    for arm in sys.argv[2:] or ("real", "clean", "raw", "small"):
         m = json.load(open(f"{run}/mirror_{arm}.json"))
         srcs = m.get("samples") or m["examples"]
         tp = TP.run(srcs, lambda B: TP.TokenPairs(B, table=table))

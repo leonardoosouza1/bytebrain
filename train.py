@@ -93,9 +93,13 @@ def main():
     ap.add_argument("--quant-bits", type=int, default=0,
                     help="N-bit quant-aware activations (byte-neuron experiment); 0 = float")
     ap.add_argument("--seed", type=int, default=-1, help="fix RNG for reproducible A/B runs")
+    ap.add_argument("--mem-frac", type=float, default=0.0,
+                    help="cap this process's VRAM share (0 = no cap); keeps parallel runs inside the 80%% budget")
     a = ap.parse_args()
     os.makedirs(a.ckpt_dir, exist_ok=True)
     DEV = a.device
+    if a.mem_frac > 0:
+        torch.cuda.set_per_process_memory_fraction(a.mem_frac)
     if a.seed >= 0:                                  # fair A/B: identical init + data order
         torch.manual_seed(a.seed)
         np.random.seed(a.seed)
@@ -149,11 +153,14 @@ def main():
     def validate():
         model.eval()
         tot = 0.0
-        for _ in range(20):
-            xb = get_batch(VA, 32, a.ctx, DEV)
-            tot += F.cross_entropy(model(xb[:, :-1]).reshape(-1, 256), xb[:, 1:].reshape(-1)).item()
+        nb = max(1, 640 // a.batch)                  # ~640 windows whatever the batch; same autocast as training
+        for _ in range(nb):
+            xb = get_batch(VA, a.batch, a.ctx, DEV)
+            with torch.autocast("cuda", dtype=torch.float16, enabled=a.amp):
+                logits = model(xb[:, :-1])
+            tot += F.cross_entropy(logits.float().reshape(-1, 256), xb[:, 1:].reshape(-1)).item()
         model.train()
-        return tot / 20 / math.log(2)
+        return tot / nb / math.log(2)
 
     def lr_at(s):                                    # warmup then cosine decay to 10% of peak lr
         if s < a.warmup:

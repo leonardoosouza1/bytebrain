@@ -142,6 +142,23 @@ Corpus index alone as generator (contexts capped at 8/16/32/48 bytes): parse 3.1
 - Equivalence (28 held-out refs, k=8): clean/self3/self4b/self3+mask mean score 0.7-1.1%, pass@8 3.6%; floor
   `return arg0` 9.4% / pass 7.1%. On 200 TRAINING functions: self3 1.4%, pass@8 5% (floor 17.8% / 12%).
   => the 26M model learned FORM (grammar, indentation, style), zero MEANING; it does not even memorize.
-- Next (2026-10-22 19:00): isolate meaning in a domain where truth is computable and compositional —
-  synthetic list functions named by composed primitives, held-out unseen compositions, equivalence-graded
-  self-training (`synth/`).
+- **synth/** (meaning in isolation): `synth/synth.py`. Names compose meaning (`double_then_keep_even_then_sum`),
+  13 list primitives x 7 finals, truth = output equality on 30 fixed int lists in bwrap. Train = 1- and 80% of
+  2-primitive names; test_a = unseen pairs; test_b = 3 primitives (unseen length); `self` pool = other 3-primitive names.
+  3M model (dim 256, L4), runs in `$R/synth/`.
+
+  | ckpt | test_a pass@1 | test_b pass@1 | test_b pass@8 |
+  |---|---|---|---|
+  | base (3000 steps) | 47.3 | 14.1 | 35.0 |
+  | self1, fine-tune at LR floor | 42.9 | 16.0 | 35.3 |
+  | self1, real LR (+3000 steps) | 69.3 | 25.2 | 38.0 |
+  | ctrl: +3000 steps train.txt only | **76.5** | 24.7 | 28.3 |
+
+  Lessons: (1) fine-tune at the LR floor does not even fix the trained names (pass@1 on kept names 40.6 -> 42.9%)
+  — likely also limited the pycode rounds. (2) Self-training gain was just extra training (control).
+  (3) Mechanism: 92.5% of kept bodies SKIP a primitive — the base writes 2 lines (never saw 3) and passes only where a
+  primitive is redundant on the inputs (`abs_then_abs`), so execution truth rewarded the shortcut; "shortest exact"
+  selection made it worse.
+- 2026-10-22 ~19:45 running `run_self2.sh`: selection = exact AND structural law measured on train (one `xs =` line
+  per primitive in the name), k=32 on 4000 names, from ctrl; vs ctrl2 (same steps, train only).
+  Prediction: self2 test_b pass@1 >= ctrl2 + 10 pp.

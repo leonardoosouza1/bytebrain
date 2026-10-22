@@ -106,7 +106,7 @@ def main():
 
     data = np.memmap(a.corpus, dtype=np.uint8, mode="r")    # scales to many GB, no RAM blow-up
     n = len(data)
-    cut = int(n * 0.999)
+    cut = min(int(n * 0.999), n - 8 * (a.ctx + 1))    # small corpora: val must hold whole windows
     TR, VA = data[:cut], data[cut:]
     print(f"corpus {n/1e6:.1f}MB | train {len(TR)/1e6:.1f}MB | val {len(VA)/1e6:.2f}MB", flush=True)
 

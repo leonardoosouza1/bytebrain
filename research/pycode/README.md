@@ -159,6 +159,45 @@ Corpus index alone as generator (contexts capped at 8/16/32/48 bytes): parse 3.1
   (3) Mechanism: 92.5% of kept bodies SKIP a primitive — the base writes 2 lines (never saw 3) and passes only where a
   primitive is redundant on the inputs (`abs_then_abs`), so execution truth rewarded the shortcut; "shortest exact"
   selection made it worse.
-- 2026-10-22 ~19:45 running `run_self2.sh`: selection = exact AND structural law measured on train (one `xs =` line
-  per primitive in the name), k=32 on 4000 names, from ctrl; vs ctrl2 (same steps, train only).
-  Prediction: self2 test_b pass@1 >= ctrl2 + 10 pp.
+- **Progression on synth (2026-10-22, all from the same 3M model; pass@1 %, n test_a=238, test_b=400, k=8).**
+  Each row = one idea tested; prediction in brackets, PASS/FAIL against it.
+
+  | step | what changed | test_a | test_b | test_b @8 |
+  |---|---|---|---|---|
+  | base | 3000 steps on train.txt (1- and 2-prim names) | 47.3 | 14.1 | 35.0 |
+  | self1 | execution-graded self-training, shortest exact body | 69.3 | 25.2 | 38.0 |
+  | ctrl | same extra steps, train.txt only | 76.5 | 24.7 | 28.3 |
+  | self2 | selection = exact AND line law (one `xs =` per primitive); only 80/4000 kept [>= ctrl2+10: FAIL] | 79.7 | 27.3 | |
+  | ctrl2 | control for self2 | 91.4 | 24.1 | |
+  | ctrl2 + law mask | GPU mask forces line count during sampling | 98.6 | 14.2 | |
+  | self3 | proposals sampled WITH law mask, law-lines selection, 2103/7686 kept [>= ctrl3+15: FAIL, +6.2] | 74.5 | 30.8 | 40.3 |
+  | ctrl3 | control for self3 | 96.2 | 24.6 | 27.0 |
+  | ctrl3 + law mask | | 100 | 10.0 | 20.5 |
+  | **loc_ce** | from ctrl3: 6 rounds x (propose 400 names x8 with law mask -> run every line prefix -> keep bodies whose EVERY intermediate state is right -> 250 steps CE, half own / half train replay, lr 1e-4) | **94.1** | **82.8** | **88.3** |
+  | loc_loc | loc_ce + unlikelihood (weight 0.1) on the first wrong line, half batch exact / half localized-error [>= ce+5: FAIL] | 82.4 | 49.4 | 66.3 |
+
+  Diagnosis of the error (`locate.py diagnose`, self3 on test_b, 3200 samples, exact 16.2%): first wrong line
+  0:173, **1:2474 (92% = the MIDDLE line)**, 2:36. Top confusions: asked unique did square 88, add_one->keep_odd 52,
+  sort->double 51, keep_even->keep_pos 48, negate->abs 46. The model writes p1, then jumps to p3: it loses its
+  place inside the name (global state / coherence), it does not misread a primitive's meaning.
+
+  Fast "repair bank" (`locate.py repair`, self3, test_b n=400, budget 8 executions, 1 candidate per attempt):
+  first try 30.75%; fresh resampling solves 39.75%; repair from the first wrong line with memory of wrong lines
+  40.25%. Prediction (repair >= fresh +10) FAILED: at equal budget, regenerating from the error = resampling.
+  cands=4 run OOMed at mem-frac 0.3, requeued at 0.5.
+
+  Lessons: (4) pointing at the error with unlikelihood HURTS (-33 pp on test_b vs plain CE on verified bodies);
+  copying what is right teaches more than pushing away what is wrong. First loc version collapsed to exact 0.0
+  after one round (UL weight 1, 90% of examples negative). (5) The law mask helps where the name length was trained
+  and hurts on longer names when used at eval (forces a duplicate line); used only for PROPOSALS it is the lever.
+  (6) The 24.6 -> 82.8 jump is NOT yet attributed. Running controls (`run_ctrl_loc.sh`):
+  A `--arm final` = same loop but truth = final output only (no per-line check, like self3);
+  B `--rounds 1 --steps 1500` = same steps, no on-policy iteration. Then `diagnose` on loc_ce.
+  If A ~ loc_ce: per-line truth is not the cause; if B ~ loc_ce: iteration is not the cause.
+
+  Reproduce (R=/media/llm-data/universe-runs/bytebrain-pycode-20261022/synth):
+  `locate.py train $R/ctrl3/ckpt/ckpt.pt --arm ce --law-mask --rounds 6 --steps 250 --out-ckpt $R/loc_ce/ckpt.pt`
+  then `synth.py eval $R/loc_ce/ckpt.pt --split test_b --out ...` (eval without mask). Wall ~3 min train + 30 s eval.
+- Next: fill A/B attribution; if line-level truth + iteration holds, carry it to real Python (Coder-3B or bwrap
+  tests as the per-line judge); slow "pointer" state for position inside the task (the middle-line failure);
+  capacity sweep 1M/3M/12M.

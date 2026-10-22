@@ -4,7 +4,7 @@ Visible = docstring examples + seed-2 cases that are NOT edge cases (spec.hidden
 seed, so using them would leak the hidden set). Among samples passing every visible case, pick the largest
 behaviour cluster on fuzz inputs (no expected outputs). Hidden = seeds 0,1 in full, only for the report.
 
-Usage: calc_native.py --out DIR [--k 32] [--url http://127.0.0.1:8140]
+Usage: calc_native.py --out DIR [--k 32] [--url http://127.0.0.1:8140] [--only evaluate]
 """
 
 import argparse
@@ -67,17 +67,20 @@ def main():
     ap.add_argument("--k", type=int, default=32)
     ap.add_argument("--temperature", type=float, default=0.8)
     ap.add_argument("--url", default="http://127.0.0.1:8140")
+    ap.add_argument("--only", default="", help="comma-separated function names (default: all)")
+    ap.add_argument("--max-new", type=int, default=512, help="token cap per sample (evaluate needs ~1000; 512 truncates)")
     args = ap.parse_args()
+    entries = [e for e in spec.SPEC if not args.only or e["name"] in args.only.split(",")]
     pool = ThreadPoolExecutor(32)
     picks, report, samples = {}, {"k": args.k, "functions": {}}, {}
     t_all = time.perf_counter()
-    for entry in spec.SPEC:
+    for entry in entries:
         name = entry["name"]
         stub = spec.stub(entry)
         prefix = HEAD + stub
         text = P.CHAT.format(user=ASK.format(prefix), prefix=prefix)
         t0 = time.perf_counter()
-        outs = list(pool.map(lambda s: P.complete(args.url, text, 512, args.temperature if s else 0.0, 4000 + s),
+        outs = list(pool.map(lambda s: P.complete(args.url, text, args.max_new, args.temperature if s else 0.0, 4000 + s),
                              range(args.k + 1)))
         gen_s = time.perf_counter() - t0
         codes = [ev.clean(prefix + o) for o in outs]
@@ -101,9 +104,9 @@ def main():
     report["wall_s"] = round(time.perf_counter() - t_all, 1)
     # one module: strip each pick's own `import math` header, keep one
     module = HEAD + "\n\n".join(picks[e["name"]][len(HEAD):] if picks[e["name"]].startswith(HEAD) else picks[e["name"]]
-                                for e in spec.SPEC)
+                                for e in entries)
     report["module"] = module
-    print(f"picked functions hidden-ok: {picked}/{len(spec.SPEC)}  wall {report['wall_s']}s", flush=True)
+    print(f"picked functions hidden-ok: {picked}/{len(entries)}  wall {report['wall_s']}s", flush=True)
     os.makedirs(args.out, exist_ok=True)
     with open(os.path.join(args.out, f"calc_k{args.k}.json"), "w") as fh:
         json.dump(report, fh, indent=1)

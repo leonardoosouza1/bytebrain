@@ -29,7 +29,17 @@ ASK_TESTS = ("Here is a function of a scientific calculator:\n\n```python\n{stub
 LINE = re.compile(r"^\s*(?:assert\s+)?(\w+\(.*\))\s*(==|raises)\s*(.+?)\s*$")
 
 
-def parse_tests(name, text):
+def json_safe(x, containers):
+    """True if x crosses the JSON sandbox boundary unchanged (no complex, no dict/set)."""
+    if isinstance(x, bool) or isinstance(x, str) or (isinstance(x, (int, float)) and not isinstance(x, complex)):
+        return True
+    if containers and isinstance(x, (tuple, list)) and len(x) <= 64:
+        return all(json_safe(v, containers) for v in x)
+    return False
+
+
+def parse_tests(name, text, containers=False):
+    """containers=True also keeps list/tuple arguments (parser helpers take token lists)."""
     out = []
     for line in text.splitlines():
         m = LINE.match(line)
@@ -40,11 +50,11 @@ def parse_tests(name, text):
             if not (isinstance(call, ast.Call) and getattr(call.func, "id", None) == name) or call.keywords:
                 continue
             args = tuple(ast.literal_eval(a) for a in call.args)
-            if not all(isinstance(a, (int, float, str)) for a in args):
-                continue  # complex/containers do not cross the JSON sandbox boundary
+            if not all(json_safe(a, containers) for a in args):
+                continue
             if m.group(2) == "==":
                 exp = ("ok", ast.literal_eval(m.group(3)))
-                if not isinstance(exp[1], (int, float, str, bool, tuple)) or isinstance(exp[1], complex):
+                if not json_safe(exp[1], True):
                     continue
             else:
                 exp = ("err", m.group(3).strip().split(".")[-1].rstrip(")"))
@@ -62,11 +72,13 @@ def main():
     ap.add_argument("--url", default="http://127.0.0.1:8140")
     ap.add_argument("--rule", default="votes", choices=["codet", "votes"],
                     help="codet = |cluster| * tests passed; votes = sum of test vote weights passed, size breaks ties")
+    ap.add_argument("--only", default="", help="comma-separated function names (default: all in the samples file)")
     args = ap.parse_args()
     samples = json.load(open(os.path.join(args.run, f"samples_k{args.k}.json")))
     pool = ThreadPoolExecutor(32)
     report, picks = {"t": args.t, "rule": args.rule, "functions": {}}, {}
-    for entry in spec.SPEC:
+    entries = [e for e in spec.SPEC if e["name"] in samples and (not args.only or e["name"] in args.only.split(","))]
+    for entry in entries:
         name = entry["name"]
         stub = spec.stub(entry)
         text = P.CHAT.format(user=ASK_TESTS.format(stub=stub, name=name), prefix="")
@@ -111,8 +123,8 @@ def main():
         print(f"{name:14s} tests {len(tests):3d} groups {len(groups):3d} pick passes {len(passed):3d}  "
               f"hidden {f['pick_hidden']:d}", flush=True)
     report["picked_hidden_ok"] = sum(f["pick_hidden"] for f in report["functions"].values())
-    print(f"picked functions hidden-ok: {report['picked_hidden_ok']}/{len(spec.SPEC)}", flush=True)
-    module = cn.HEAD + "\n\n".join(picks[e["name"]].removeprefix("import math").lstrip("\n") for e in spec.SPEC)
+    print(f"picked functions hidden-ok: {report['picked_hidden_ok']}/{len(entries)}", flush=True)
+    module = cn.HEAD + "\n\n".join(picks[e["name"]].removeprefix("import math").lstrip("\n") for e in entries)
     with open(os.path.join(args.run, f"codet_{args.rule}_t{args.t}.json"), "w") as fh:
         json.dump(report, fh, indent=1)
     with open(os.path.join(args.run, f"calculator_{args.rule}_t{args.t}.py"), "w") as fh:

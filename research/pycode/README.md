@@ -214,6 +214,9 @@ Corpus index alone as generator (contexts capped at 8/16/32/48 bytes): parse 3.1
   Reproduce (R=/media/llm-data/universe-runs/bytebrain-pycode-20261022/synth):
   `locate.py train $R/ctrl3/ckpt/ckpt.pt --arm ce --law-mask --rounds 6 --steps 250 --out-ckpt $R/loc_ce/ckpt.pt`
   then `synth.py eval $R/loc_ce/ckpt.pt --split test_b --out ...` (eval without mask). Wall ~3 min train + 30 s eval.
-- Next: more rounds (does it keep climbing past 6?); 4-primitive names (length generalization); carry it to real Python (Coder-3B or bwrap
+- 6 more rounds from loc_ce (12 total): test_a 87.1 (-7.0, forgets pairs: self pool is 3-prim only), test_b
+  **83.8** (+1.0, pass@8 88.3). Prediction (>= 88) FAILED: plateau ~83%, round exact stuck 0.76-0.83. The
+  remaining middle-line errors are not removed by more of the same loop.
+- Next: 4-primitive names (length generalization); carry it to real Python (Coder-3B or bwrap
   tests as the per-line judge); slow "pointer" state for position inside the task (the middle-line failure);
   capacity sweep 1M/3M/12M.

@@ -1,0 +1,23 @@
+bank: 2123 symbols, 843 names, 406 scopes, 6266 postings
+name->id                       std HashMap<&str> (SipHash)                  16.34 ns      20232 B  
+name->id                       FxHashMap<&str>                               7.13 ns      20232 B  
+name->id                       sorted Vec + binary search                   66.65 ns      16860 B  
+name->id                       linear scan Vec<(&str,u32)>                 190.90 ns      16860 B  
+resolve(scope,name)->sym       FxHashMap<u64> + parent walk                  2.83 ns      33968 B  
+id->signature (&str)           SoA offsets + blob                            1.14 ns          0 B  
+id->full record                AoS packed 20 B record                        1.29 ns         20 B  B/symbol
+id->full record                SoA 7 arrays                                  2.63 ns         26 B  B/symbol
+uses(sym) -> slice             CSR slice (len)                               0.82 ns          4 B  B/use
+uses(sym) -> decode all        CSR + addr32 decode (file,line,col)           3.48 ns          4 B  avg 6.8 uses/query
+live locals at line L          SoA brute scan (branchless)                 437.82 ns          9 B  1516 locals scanned
+live locals at line L          scope index (binary search) + filter         31.99 ns         12 B  <= brute on 4096/4096
+live locals at line L          precomputed per-line CSR                      1.20 ns     112000 B  total bytes of index
+nibble stream decode           scalar, per token                             0.74 ns          0 B  76 tok/fn; 0.5 B/token
+nibble stream count(id==3)     SWAR 16 nibbles/u64, per token                0.07 ns          0 B  
+u16 ptr decode file4|fn8|loc4  shifts+masks                                  0.45 ns          2 B  
+(scope, nibble slot) -> sym    base[scope] + slot -> ss[]                    1.22 ns          0 B  2 dependent loads
+name->id (1M names)            FxHashMap<&str>                              29.96 ns          0 B  out of cache
+id->full record (1M)           AoS packed 20 B record                        2.45 ns         20 B  random access, 20 MB
+dependent load chain           u32 array, 2123 entries                       1.11 ns       8492 B  latency, not throughput
+dependent load chain           u32 array, 1000000 entries                   12.49 ns    4000000 B  latency, not throughput
+dependent load chain           u32 array, 16000000 entries                  28.01 ns   64000000 B  latency, not throughput

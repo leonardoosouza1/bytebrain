@@ -1,0 +1,22 @@
+name->id                     py dict                                  27.4 ns      91862 B  
+name->id                     py list-of-tuples (linear)             4527.0 ns     119974 B  
+name->id                     py sorted list + bisect                 169.9 ns     169008 B  
+name->id                     numpy hash+searchsorted (1/call)       2289.6 ns      10116 B  includes python FNV
+name->id                     numpy searchsorted (batch 4096)          41.3 ns      10116 B  hash precomputed
+id->signature                py list[str]                             23.2 ns      49639 B  
+id->signature                py list-of-tuples [i][3]                 39.5 ns     292237 B  
+id->signature                numpy offsets + bytes.decode            184.7 ns      21863 B  
+id->signature                py offsets list + bytes.decode           87.4 ns      89047 B  
+uses(sym) postings           py list-of-lists                         22.5 ns     376632 B  
+uses(sym) postings           py flat (sym,addr) scan               93847.5 ns     642864 B  
+uses(sym) postings           numpy CSR slice (view)                  228.8 ns      33560 B  
+uses(sym) postings           numpy CSR slice + decode lines         1512.9 ns      33560 B  
+live locals at line L        py list-of-tuples scan                23919.6 ns     235056 B  
+live locals at line L        numpy full mask (1/call)               5200.8 ns      19107 B  
+live locals at line L        py bisect scope + local filter          639.5 ns      65628 B  subset-of-brute 300/300
+nibble decode (per token)    py loop                                  37.6 ns      13054 B  75 tok/fn avg
+nibble decode (per token)    numpy unpack (1 fn/call)                 62.2 ns      13054 B  
+u16 ptr decode file4|fn8|loc4 py shifts                                72.6 ns          2 B  
+ctypes overhead              ctypes noop()                           126.0 ns          0 B  
+name->id                     ctypes -> Rust FxHashMap                399.4 ns          0 B  native part is in bench.rs table
+uses(sym) postings           ctypes -> Rust count                    263.8 ns          0 B  

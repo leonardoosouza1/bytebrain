@@ -1,0 +1,8 @@
+calc_ref.py            fns=  50 whole=  1823 tok  fn mean=42 median=23.5 max=523  sig mean=5.6  tokenizer 1904 ns/tok
+calc_generated.py      fns=  40 whole=  3999 tok  fn mean=103 median=82.5 max=518  sig mean=5.7  tokenizer 1341 ns/tok
+fractions.py           fns=  46 whole=  9443 tok  fn mean=169 median=60.5 max=1102  sig mean=8.2  tokenizer 1389 ns/tok
+statistics.py          fns=  58 whole= 14761 tok  fn mean=222 median=130.0 max=1914  sig mean=8.6  tokenizer 1220 ns/tok
+argparse.py            fns= 138 whole= 20016 tok  fn mean=135 median=56.5 max=2134  sig mean=9.5  tokenizer 1504 ns/tok
+decoder.py             fns=   9 whole=  3037 tok  fn mean=279 median=132 max=678  sig mean=13.4  tokenizer 1321 ns/tok
+textwrap.py            fns=  16 whole=  4419 tok  fn mean=190 median=136.5 max=853  sig mean=8.3  tokenizer 1480 ns/tok
+params non-embedding=357.8M total=494.0M; FLOPs/token 2*0.5B=1.00e+09 2*nonemb=7.16e+08; mean fn tokens (all files)=143.2

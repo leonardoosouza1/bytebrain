@@ -1,0 +1,14 @@
+files 7 (4-bit file field holds 16)
+ file 0: function scopes=50 all scopes=52 lines=339
+ file 1: function scopes=40 all scopes=42 lines=625
+ file 2: function scopes=46 all scopes=49 lines=989
+ file 3: function scopes=58 all scopes=62 lines=1455
+ file 4: function scopes=138 all scopes=169 lines=2678
+ file 5: function scopes=9 all scopes=13 lines=357
+ file 6: function scopes=16 all scopes=19 lines=492
+symbols per function scope: max 35 p50 2.0 p95 12.0
+functions with <=15 symbols (fit a nibble, 0xF reserved): 348 / 357
+functions with <=16 symbols: 350 / 357
+module-level symbols per module scope: [46, 8, 40, 9, 16, 22, 62, 30, 45, 40, 20, 12, 11, 11]
+max col 95 max line 2677
+core SoA bytes/symbol 26.0; + names pool 5.2; + sig pool 6.3; + postings 15.8; total bank.bin 68.2 B/symbol (144810 B)

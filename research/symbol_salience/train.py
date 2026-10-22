@@ -19,6 +19,7 @@ Usage: train.py --data DATA.pt --out DIR --arms a,b --seeds 0,1,2
 
 import argparse
 import json
+import os
 import math
 import time
 
@@ -199,6 +200,7 @@ def main():
     ap.add_argument("--lr", type=float, default=3e-3)
     ap.add_argument("--out-limit", type=int, default=4000)
     args = ap.parse_args()
+    os.makedirs(args.out, exist_ok=True)
     dev = "cuda"
     raw = torch.load(args.data, weights_only=False)
     vocab = raw["vocab"]

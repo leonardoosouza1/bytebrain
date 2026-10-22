@@ -100,6 +100,38 @@ def summarize(rows):
     return {k: round(sum(r[k] for r in rows) / n, 4) for k in ("terminated", "parses", "names_ok", "runs")} | {"n": n}
 
 
+@torch.no_grad()
+def generate_masked(g, prompt, n_seq, n_bytes, temp, start):
+    """CachedGen.generate with the GPU syntax automaton in the loop: bytes that would raise an L1 error get
+    probability 0 (rows with no legal byte left are sampled unmasked). `start` = prompt bytes fed to the automaton."""
+    from gpu_syntax import SyntaxAutomaton
+    dev = g.m.device
+    sa = SyntaxAutomaton(n_seq, device=dev)
+    for c in start:
+        sa.step(torch.full((n_seq,), c, device=dev))
+    g.reset()
+    ids = torch.tensor([list(prompt)], dtype=torch.long, device=dev).repeat(n_seq, 1)
+    g.hist = ids.clone()
+    logits = g._forward(ids)
+    out = torch.zeros(n_seq, n_bytes, dtype=torch.uint8, device=dev)
+    for i in range(n_bytes):
+        ok = sa.allowed()
+        ok |= ~ok.any(1, keepdim=True)
+        p = torch.softmax(logits.float() / temp, -1) * ok
+        nxt = torch.multinomial(p / p.sum(-1, keepdim=True), 1).squeeze(-1)
+        sa.step(nxt)
+        out[:, i] = nxt.to(torch.uint8)
+        g.hist = torch.cat([g.hist, nxt[:, None]], 1)
+        if g.pos >= g.ctx:
+            tail = g.hist[:, -g.keep:]
+            g.reset()
+            g.hist = tail
+            logits = g._forward(tail)
+        else:
+            logits = g._forward(nxt[:, None])
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("ckpt")
@@ -108,14 +140,17 @@ def main():
     ap.add_argument("--bytes", type=int, default=800)
     ap.add_argument("--temp", type=float, default=0.8)
     ap.add_argument("--mem-frac", type=float, default=0.06)
+    ap.add_argument("--mask", action="store_true", help="GPU syntax automaton masks illegal bytes while generating")
     args = ap.parse_args()
     torch.cuda.set_per_process_memory_fraction(args.mem_frac)
     torch.manual_seed(0)
     m = ByteLM(args.ckpt)
     g = CachedGen(m)
     t0 = time.perf_counter()
-    report = {"ckpt": args.ckpt, "step": m.step, "temp": args.temp}
-    out = g.generate(b"\n\ndef ", args.n, args.bytes, temp=args.temp).cpu().numpy()
+    report = {"ckpt": args.ckpt, "step": m.step, "temp": args.temp, "mask": args.mask}
+    gen = (lambda pr, k, start: generate_masked(g, pr, k, args.bytes, args.temp, start)) if args.mask else \
+        (lambda pr, k, start: g.generate(pr, k, args.bytes, temp=args.temp))
+    out = gen(b"\n\ndef ", args.n, b"def ").cpu().numpy()
     free = []
     for row in out:
         src, term = cut_function("def " + bytes(row).decode("utf-8", "replace"))
@@ -129,7 +164,7 @@ def main():
         sig = h["clean"].split("\n")[0] + "\n"
         # a prompt longer than the context would index the position table out of range (GPU hardware fault)
         prompt = (b"\n\n" + sig.encode())[-(g.ctx // 2):]
-        row = g.generate(prompt, 1, args.bytes, temp=args.temp)[0].cpu().numpy()
+        row = gen(prompt, 1, sig.encode())[0].cpu().numpy()
         src, term = cut_function(sig + bytes(row).decode("utf-8", "replace"))
         comp.append({"src": src, "terminated": term, "self_contained": h["self_contained"], **judge(src)})
     report["completion"] = summarize(comp)

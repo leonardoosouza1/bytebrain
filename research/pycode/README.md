@@ -124,6 +124,24 @@ Corpus index alone as generator (contexts capped at 8/16/32/48 bytes): parse 3.1
 
 ## 7. Status / next (update this section every session)
 
-- 2026-10-22 17:2x: round 4 running — proposal from training signatures (16 attempts each), bwrap run check,
-  population caps; then held-out completion eval, mirror, table (`self4.*` logs in the run dir).
-  Prediction: completion runs ≥42%, parse ≥85%.
+- Round 4 (from self3; proposal = training signatures ×16 attempts, bwrap run check, population caps):
+  REGRESSED. Completion parse/names_ok/runs 78.9/38.3/26.6% (self3: 82.8/47.7/35.2); free runs 21.1% (self3 34.4%).
+  Mirror axes best so far (bits/line 3.36, I(k32) 2.3×, bigram KL 0.17). 727/2048 rejected for unused params:
+  real signatures carry many params the model cannot use yet. Prediction (runs ≥42%) FAILED.
+- Why round 4 regressed (counted on accepted `good.txt`): only 128 signatures x16 attempts -> **98 distinct
+  def names** (self3: 475), self-contained 39% (self3 50%). Task diversity, not body diversity, was lost.
+- Control round 4b (round 4 recipe, free `def ` prompts): completion 79.7/45.3/32.0%, free runs 28.1%.
+  Prediction (4b >= self3) FAILED; 4b vs self3 within noise (n=128, SE ~4 pp). Self-training **plateaued at
+  round 3**; another filter-and-retrain round does not climb. Best checkpoint: self3.
+- L1 automaton as byte mask inside generation (`eval_samples.py --mask`, self3, n=256): free parse 81.6 -> 83.6%,
+  completion runs 34.0 -> 34.0%. Prediction (+8 pp parse) FAILED. Remaining failures are not syntax: of 256
+  completions 94 use free names, 39 crash, 17 do not terminate, ~12 are syntax errors.
+- **Metric correction:** 240/256 completion targets are not self-contained even in the original, so "runs" rewarded
+  inventing a trivially executable body, not doing the task. New judge `equiv.py`: real self-contained function vs
+  model body on 40 deterministic fuzz inputs in bwrap, graded score = share of equal outputs (+ in-place effects).
+- Equivalence (28 held-out refs, k=8): clean/self3/self4b/self3+mask mean score 0.7-1.1%, pass@8 3.6%; floor
+  `return arg0` 9.4% / pass 7.1%. On 200 TRAINING functions: self3 1.4%, pass@8 5% (floor 17.8% / 12%).
+  => the 26M model learned FORM (grammar, indentation, style), zero MEANING; it does not even memorize.
+- Next (2026-10-22 19:00): isolate meaning in a domain where truth is computable and compositional —
+  synthetic list functions named by composed primitives, held-out unseen compositions, equivalence-graded
+  self-training (`synth/`).

@@ -217,6 +217,40 @@ Corpus index alone as generator (contexts capped at 8/16/32/48 bytes): parse 3.1
 - 6 more rounds from loc_ce (12 total): test_a 87.1 (-7.0, forgets pairs: self pool is 3-prim only), test_b
   **83.8** (+1.0, pass@8 88.3). Prediction (>= 88) FAILED: plateau ~83%, round exact stuck 0.76-0.83. The
   remaining middle-line errors are not removed by more of the same loop.
-- Next: 4-primitive names (length generalization); carry it to real Python (Coder-3B or bwrap
-  tests as the per-line judge); slow "pointer" state for position inside the task (the middle-line failure);
-  capacity sweep 1M/3M/12M.
+- **ERRATA (code review, 2026-10-22 late night).** Every `synth.py eval` / `propose` number above was measured with
+  prompts LEFT-PADDED with "\n" to batch names of different lengths. Fine-tuned models read absolute position as a
+  line-count cue (probe: same prompt + 30 bytes of padding -> second line becomes `return xs`). Fixed: prompts are
+  batched only with prompts of the same length. Also fixed: (a) a `print` in a generated body broke the runner's
+  JSON and zeroed a whole chunk (up to 512 samples); (b) `return` before every primitive was written counted as
+  exact when the skipped primitive was redundant on the inputs; (c) `pointer.py eval` took the first 400 tasks
+  unshuffled (~58 distinct triples). Re-evaluation with the fixed eval (test_a / test_b pass@1):
+
+  | ckpt | test_a | test_b old (padded) | **test_b fixed** |
+  |---|---|---|---|
+  | ctrl3 | 99.95 | 24.6 | 25.7 |
+  | self3 | 96.95 | 30.8 | 43.5 |
+  | loc_once (B, 1 round) | 99.95 | 41.8 | 57.6 |
+  | loc_loc (unlikelihood) | 99.89 | 49.4 | 73.7 |
+  | loc_final (A, final-output truth) | 99.84 | 72.1 | 88.75 |
+  | **loc_ce** | 99.74 | 82.8 | **99.84** |
+  | loc_ce12 | 100 | 83.8 | 100 |
+
+  Ordering and conclusions hold, the gaps change: iteration +42 pp (57.6 -> 99.8), per-line truth +11 pp
+  (88.75 -> 99.8), unlikelihood -26 pp. The "plateau at 83%" and "test_a forgetting" were padding artefacts.
+- **Pointer (`synth/pointer.py`)**: body written one line at a time; before each line the name segments already
+  written are UPPER-cased (bit 5 flip) = slow state that changes only at line events and says WHERE, never WHAT.
+  Control `plain` = same line-by-line loop, name unchanged. Both from ctrl3, warm 500 steps + 6 verified rounds.
+
+  | arm | test_a | test_b | round 2 exact / middle-line wrong |
+  |---|---|---|---|
+  | pointer | 100 | 99.94 | 96.4% / 0.8% |
+  | plain | 100 | 98.66 | 58.5% / 34.8% |
+
+  Prediction (pointer >= plain +5 on test_b) FAILED at the ceiling; pointer learns ~2 rounds faster.
+  Unseen LENGTH (4 primitives; training never beyond 3): first run pointer 68.2 vs plain 33.0 pass@1
+  (prediction pointer >= plain +20). 5-primitive prompts overflowed ctx 256 (HSA exception, same trap as before);
+  rows that would not fit now stop and count as wrong; len4/len5 rerun for both arms with that rule.
+- Next: synth v2 closer to real code (arguments, if, loop + accumulator, calculator ops; a line is no longer a copy
+  of a name segment, so it starts measuring meaning); separate organs (meaning model + pointer + writer, CfC
+  integrator) vs one model of equal size; real Python with an agent writing spec + tests and bwrap as per-line
+  truth; capacity sweep 1M/3M/12M.

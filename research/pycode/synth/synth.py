@@ -58,6 +58,8 @@ INPUTS = [[_r.randint(-5, 9) for _ in range(_r.randint(0, 7))] for _ in range(30
 RUNNER = r'''
 import json, sys, signal
 items, inputs = json.loads(sys.stdin.read())
+import io
+real_out, sys.stdout = sys.stdout, io.StringIO()     # generated code may print: keep it out of the result line
 def alarm(*_):
     raise TimeoutError
 signal.signal(signal.SIGALRM, alarm)
@@ -82,7 +84,7 @@ for src, name in items:
             out.append("!")
         signal.setitimer(signal.ITIMER_REAL, 0)
     res.append(out)
-print(json.dumps(res))
+real_out.write(json.dumps(res) + "\n")
 '''
 
 
@@ -138,19 +140,22 @@ def run_many(items):
 
 
 def propose(g, tasks, k, n_bytes, temp, batch=512, law=False):
-    """tasks [(prims, final)] -> per task k sources. Prompts left-padded with newlines to one length (batched)."""
+    """tasks [(prims, final)] -> per task k sources. Batched only with prompts of the same length: left padding
+    shifts absolute position, which fine-tuned models read as a line-count cue."""
     heads = [f"def {name_of(p, f)}(xs):\n" for p, f in tasks]
-    L = max(len(h) for h in heads) + 2
-    out = []
+    out = [None] * len(tasks)
+    by_len = {}
+    for i, h in enumerate(heads):
+        by_len.setdefault(len(h), []).append(i)
     per = max(1, batch // k)
-    for i in range(0, len(heads), per):
-        hs = heads[i:i + per]
-        ids = torch.tensor([list(b"\n" * (L - len(h)) + h.encode()) for h in hs for _ in range(k)],
-                           device=g.m.device)
-        need = torch.tensor([len(p) for p, _ in tasks[i:i + per] for _ in range(k)], device=g.m.device) if law else None
-        rows = generate_rows(g, ids, n_bytes, temp, need).cpu().numpy()
-        for j, h in enumerate(hs):
-            out.append([cut_function(h + bytes(rw).decode("utf-8", "replace"))[0] for rw in rows[j * k:(j + 1) * k]])
+    for group in by_len.values():
+        for c in range(0, len(group), per):
+            idx = group[c:c + per]
+            ids = torch.tensor([list(b"\n\n" + heads[i].encode()) for i in idx for _ in range(k)], device=g.m.device)
+            need = torch.tensor([len(tasks[i][0]) for i in idx for _ in range(k)], device=g.m.device) if law else None
+            rows = generate_rows(g, ids, n_bytes, temp, need).cpu().numpy()
+            for j, i in enumerate(idx):
+                out[i] = [cut_function(heads[i] + bytes(rw).decode("utf-8", "replace"))[0] for rw in rows[j * k:(j + 1) * k]]
     return out
 
 

@@ -92,7 +92,8 @@ def diagnose(tasks, srcs):
                 o = per.get((t, j, i))
                 is_ret = l.strip().startswith("return")
                 want = fin if is_ret else (ref[i + 1] if i + 1 < len(ref) else None)
-                if o is not None and want is not None and o == want:
+                early = is_ret and i < len(p)          # return before every primitive was written: wrong line
+                if o is not None and want is not None and o == want and not early:
                     ok += 1
                     if is_ret:
                         break

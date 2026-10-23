@@ -138,8 +138,9 @@ def source(units, final):
 
 def reference(units, final):
     g = {}
-    exec(source(units, final), g)
-    f = g[name_of(units, final)]
+    # neutral name: a function named after a unit (`abs`) would shadow the builtin it calls and recurse
+    exec(source(units, final).replace(f"def {name_of(units, final)}(", "def _ref(", 1), g)
+    f = g["_ref"]
     return [repr(f(list(xs), k) if nargs(units) == 2 else f(list(xs))) for xs, k in INPUTS]
 
 

@@ -187,6 +187,10 @@ Corpus index alone as generator (contexts capped at 8/16/32/48 bytes): parse 3.1
   cands=4 run OOMed at mem-frac 0.3, requeued at 0.5.
 
   cands=4 (4 candidates per repair attempt, best kept): repair 41.25% vs fresh 39.75%. FAILED too.
+  Rerun without left padding (commit 16f8dfa): first try 44.75%; fresh 51.75%; repair 51.75% with 1 AND 4
+  candidates. Not a bug: repair does lift 44.75 -> 51.75; both arms hit the model's own ceiling (independent
+  pass@8 of self3 = 52.75%). Tasks are bimodal - the model either knows the body or never writes it; remembering
+  the wrong line does not supply the right one. Prediction (repair = fresh +-3): PASS.
 
   **Attribution of the jump (controls, test_b pass@1, same start ctrl3 24.6):**
 
@@ -249,7 +253,19 @@ Corpus index alone as generator (contexts capped at 8/16/32/48 bytes): parse 3.1
   Prediction (pointer >= plain +5 on test_b) FAILED at the ceiling; pointer learns ~2 rounds faster.
   Unseen LENGTH (4 primitives; training never beyond 3): first run pointer 68.2 vs plain 33.0 pass@1
   (prediction pointer >= plain +20). 5-primitive prompts overflowed ctx 256 (HSA exception, same trap as before);
-  rows that would not fit now stop and count as wrong; len4/len5 rerun for both arms with that rule.
+  rows that would not fit now stop and count as wrong; len4/len5 rerun for both arms with that rule:
+
+  | arm | len4 pass@1 | len5 pass@1 |
+  |---|---|---|
+  | pointer | **67.72** | 14.78 |
+  | plain | 32.97 | 15.81 |
+
+  len4: PASS (+34.8 pp, prediction +20). len5: no difference, both capped by ctx 256 (5-primitive bodies do not
+  fit after the prompt; the byte unit makes sequences long - a context limit, not a pointer limit).
+- Audit of the same bug classes in other projects (2026-10-22): left padding + absolute positions only in
+  pycode/synth (stress_learning uses Qwen RoPE + right padding, safe); print-unsafe runners also in
+  `pycode/eval_samples.py` and `pycode/equiv.py` (fixed, commit 16f8dfa); codegen_calc / edit_by_address judges
+  were already safe. Rules in `META/handbook-llm/VALIDATION.md` section 6.
 - Next: synth v2 closer to real code (arguments, if, loop + accumulator, calculator ops; a line is no longer a copy
   of a name segment, so it starts measuring meaning); separate organs (meaning model + pointer + writer, CfC
   integrator) vs one model of equal size; real Python with an agent writing spec + tests and bwrap as per-line

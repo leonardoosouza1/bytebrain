@@ -201,14 +201,23 @@ def repair(g, split, a):
                 bad[t].add(lines[w].strip())
             prompts.append((t, heads[t] + "".join(l + "\n" for l in lines[:w])))
         # a.cands candidates per repair (1 = same generation budget as fresh); first one that avoids every remembered wrong line (else the first)
-        L = max(len(pr) for _, pr in prompts) + 2
-        ids = torch.tensor([list(b"\n" * (L - len(pr)) + pr.encode()) for _, pr in prompts for _ in range(a.cands)],
-                           device=g.m.device)
-        need = torch.tensor([len(tasks[t][0]) for t, _ in prompts for _ in range(a.cands)], device=g.m.device) \
-            if a.law_mask else None
-        rows = synth.generate_rows(g, ids, 200, 0.8, need).cpu().numpy()
+        # batched only with prompts of the same length (left padding shifts absolute position)
+        rows = [None] * len(prompts)
+        by_len = {}
+        for j, (_, pr) in enumerate(prompts):
+            by_len.setdefault(len(pr), []).append(j)
+        for js in by_len.values():
+            ids = torch.tensor([list(b"\n\n" + prompts[j][1].encode()) for j in js for _ in range(a.cands)],
+                               device=g.m.device)
+            # law mask counts lines from the prompt end: subtract the kept lines already in the prompt
+            need = torch.tensor([max(0, len(tasks[prompts[j][0]][0]) - (prompts[j][1].count("\n") - 1))
+                                 for j in js for _ in range(a.cands)],
+                                device=g.m.device) if a.law_mask else None
+            out = synth.generate_rows(g, ids, 200, 0.8, need).cpu().numpy()
+            for q, j in enumerate(js):
+                rows[j] = out[a.cands * q:a.cands * (q + 1)]
         for j, (t, pr) in enumerate(prompts):
-            cands = [synth.cut_function(pr + bytes(r).decode("utf-8", "replace"))[0] for r in rows[a.cands * j:a.cands * (j + 1)]]
+            cands = [synth.cut_function(pr + bytes(r).decode("utf-8", "replace"))[0] for r in rows[j]]
             ok = [c for c in cands if not any(l.strip() in bad[t] for l in body_lines(c))]
             cur[t] = (ok or cands)[0]
             used[t] += 1

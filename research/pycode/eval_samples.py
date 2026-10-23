@@ -35,11 +35,13 @@ HOLDOUT = "/media/llm-data/datasets/pycode/holdout_functions.json"
 RUNNER = r'''
 import json, sys, random
 src, fname, nargs = json.loads(sys.stdin.read())
+import io
+real_out, sys.stdout = sys.stdout, io.StringIO()     # generated code may print: keep the result line clean
 g = {}
 try:
     exec(src, g)
 except Exception as e:
-    print(json.dumps("load:" + type(e).__name__)); sys.exit()
+    real_out.write(json.dumps("load:" + type(e).__name__) + "\n"); sys.exit()
 bad = ("NameError", "UnboundLocalError", "SyntaxError")
 r = random.Random(0)
 pool = [0, 1, 3, -2, 2.5, "ab", "", [1, 2], (1, 2), {"a": 1}, None, True]
@@ -50,7 +52,7 @@ for _ in range(4):
     except BaseException as e:
         if type(e).__name__ in bad:
             res = type(e).__name__; break
-print(json.dumps(res))
+real_out.write(json.dumps(res) + "\n")
 '''
 
 

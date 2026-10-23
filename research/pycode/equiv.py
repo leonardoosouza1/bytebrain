@@ -28,11 +28,13 @@ N_IN = 40
 RUNNER = r'''
 import json, sys, random, signal
 src, fname, nargs, n_in = json.loads(sys.stdin.read())
+import io
+real_out, sys.stdout = sys.stdout, io.StringIO()     # generated code may print: keep the result line clean
 g = {}
 try:
     exec(src, g)
 except BaseException as e:
-    print(json.dumps("load")); sys.exit()
+    real_out.write(json.dumps("load") + "\n"); sys.exit()
 def alarm(*_):
     raise TimeoutError
 signal.signal(signal.SIGALRM, alarm)
@@ -49,7 +51,7 @@ for i in range(n_in):
         out[i] = repr(res)[:300] + "|" + repr(args)[:300]     # result and in-place effect on the arguments
     except BaseException:
         signal.setitimer(signal.ITIMER_REAL, 0)
-print(json.dumps(out))
+real_out.write(json.dumps(out) + "\n")
 '''
 
 

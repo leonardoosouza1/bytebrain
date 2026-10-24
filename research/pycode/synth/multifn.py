@@ -53,11 +53,24 @@ DEFS = {   # op -> (body lines, direct deps)
 }
 OPS = sorted(DEFS)
 SYM = ["<pad>", "<sep>", "<eos>"] + [f"def:{o}" for o in OPS] + [f"disp:{o}" for o in OPS]
-MAX_OUT = 34                                     # 15 defs + 15 dispatch + eos
+MAX_OUT = 34                                     # grouped: 15 defs + 15 dispatch + eos; interleaved: set in main
 CASES = [(a, b) for a in (-2, 0, 1, 3, 5) for b in (-1, 0, 2, 4)]
 
 
+PLAN_FORMAT = "grouped"     # grouped: all defs then all dispatch lines (two passes over the name)
+                            # interleaved: per op in name order: its dep closure, def, dispatch (one monotone pass)
+
+
 def plan_of(spec):
+    if PLAN_FORMAT == "interleaved":
+        out = []
+        for o in spec:
+            out += [s for s in plan_of_grouped((o,)) if s != "<eos>"]
+        return out + ["<eos>"]
+    return plan_of_grouped(spec)
+
+
+def plan_of_grouped(spec):
     order, seen = [], set()
 
     def visit(o):
@@ -80,7 +93,7 @@ def block_text(sym):
 
 
 def assemble(syms):
-    defs = [s for s in syms if s.startswith("def:")]
+    defs = list(dict.fromkeys(s for s in syms if s.startswith("def:")))   # a repeated def is written once
     disp = [s for s in syms if s.startswith("disp:")]
     return "".join(block_text(s) for s in defs) + "def main(op, a, b=0):\n" + \
         "".join(block_text(s) for s in disp) + "    return None\n"
@@ -259,7 +272,7 @@ def evaluate(planner, writer, data, names):
         srcs = []
         for p in plans:
             body = [s for s in p if s.startswith(("def:", "disp:"))]
-            defs = "".join(texts[s] for s in body if s.startswith("def:"))
+            defs = "".join(texts[s] for s in dict.fromkeys(s for s in body if s.startswith("def:")))
             disp = "".join(texts[s] for s in body if s.startswith("disp:"))
             srcs.append(defs + "def main(op, a, b=0):\n" + disp + "    return None\n")
         refs = [assemble(plan_of(sp)) for sp in specs]
@@ -285,23 +298,27 @@ def main():
     ap.add_argument("--steps", type=int, default=2000)
     ap.add_argument("--writer-dim", type=int, default=64)
     ap.add_argument("--threads", type=int, default=2)
+    ap.add_argument("--plan-format", default="grouped", choices=["grouped", "interleaved"])
     a = ap.parse_args()
     torch.set_num_threads(a.threads)
     os.makedirs(a.out, exist_ok=True)
+    global PLAN_FORMAT, MAX_OUT
+    PLAN_FORMAT = a.plan_format
+    MAX_OUT = max(34, len(plan_of(tuple(OPS))) + 4)
     setup_planner_globals()
     data = Data()
     t0 = time.perf_counter()
     planner = train_planner(data, a.seed, a.steps)
     writer, pool = train_writer(data, a.writer_dim, a.seed)
     names = ["test_comb", "len4", "len5", "len6", "len7", "len8", "basic", "full"]
-    res = {"seed": a.seed, "steps": a.steps, "n_train": len(data.sets["train"]),
+    res = {"seed": a.seed, "steps": a.steps, "plan_format": a.plan_format, "max_out": MAX_OUT, "n_train": len(data.sets["train"]),
            "max_train_plan": max(len(plan_of(s)) for s in data.sets["train"]),
            "planner_params": sum(p.numel() for p in planner.parameters()),
            "writer_params": sum(p.numel() for p in writer.parameters()),
            "wall_s": round(time.perf_counter() - t0, 1), "eval": evaluate(planner, writer, data, names)}
     print(json.dumps({k: (v if k != "eval" else {s: {m: x for m, x in r.items() if not m.startswith("example")}
                                                   for s, r in v.items()}) for k, v in res.items()}), flush=True)
-    json.dump(res, open(f"{a.out}/multifn_s{a.seed}.json", "w"), indent=1)
+    json.dump(res, open(f"{a.out}/multifn_{a.plan_format}_s{a.seed}.json", "w"), indent=1)
 
 
 if __name__ == "__main__":

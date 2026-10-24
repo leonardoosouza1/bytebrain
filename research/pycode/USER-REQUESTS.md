@@ -31,5 +31,5 @@ Status: OPEN · RUNNING · PARTIAL (what exists / what is missing) · DONE (path
 | 18 | 10-23 | Smaller model generates more? Must generate EXECUTABLE code; correct battery | RUNNING | writer d16..256 x fp/ter x 3 seeds, same planner ckpt, greedy k=1, no selector |
 | 19 | 10-23 | Opus agent: process so I never drift from his requests again | DONE | protocol added to bytebrain/CLAUDE.md |
 | 20 | 10-23 | Save everything he asks and do it (run later if needed, but do it) | DONE (this file) | |
-| 21 | 10-23 | "desenha os modelos que estamos fazendo, o fluxo de entrada de dados e saidas, conversão e afins" — visual of where everything passes | OPEN | diagram artifact |
-| 22 | 10-23 | "função que depende de outra, algo maior... calculadora basica e avançada... main que chama outras funções" — see limits and what is needed | OPEN | multi-function synth set (helpers + main) through planner+writer |
+| 21 | 10-23 | "desenha os modelos que estamos fazendo, o fluxo de entrada de dados e saidas, conversão e afins" — visual of where everything passes | DONE | https://claude.ai/artifact/QAXC69pSiRGZiBTKTFb23y (pipeline, planner address, writer, #22 deps, learned vs rule) |
+| 22 | 10-23 | "função que depende de outra, algo maior... calculadora basica e avançada... main que chama outras funções" — see limits and what is needed | RUNNING | synth/multifn.py queued after #18; oracle smoke ok (300 cases, missing dep -> NameError) |

@@ -270,3 +270,18 @@ Corpus index alone as generator (contexts capped at 8/16/32/48 bytes): parse 3.1
   of a name segment, so it starts measuring meaning); separate organs (meaning model + pointer + writer, CfC
   integrator) vs one model of equal size; real Python with an agent writing spec + tests and bwrap as per-line
   truth; capacity sweep 1M/3M/12M.
+- **10-23 → 10-26: calculator world and the end-to-end belt.** The line left free byte generation for a closed
+  world where every answer can be checked: a calculator of 15 operations, or a `main(a, b)` that returns a formula
+  (a call tree). Ledger `USER-REQUESTS.md` #12–#42 holds his requests with status; details live in
+  `ARCHITECTURE.md` (what trains, what is rule), `GUESS-AND-DERIVE.md` (#24–#26), `PIPELINE-VALIDATION.md` (belt).
+  - Address planner `synth/blockaddr.py` + byte writer `synth/bytewriter.py`: exec/pass 100% on len3–6; smallest
+    fully executable writer d32 (13k params, 3/3 seeds). Qwen2.5-0.5B prompted (not trained on the task, so not
+    like-for-like): 46% test_a, 8–10% len4–6.
+  - Functions that depend on functions (#22): interleaved plan (per op: deps, def, dispatch) generates the full
+    15-op calculator 100% (3/3 seeds); `compose.py` call trees trained on 1–3 calls: 4–6 calls 99–100%, 8 calls
+    93–100%.
+  - Belt (#29 #32 #39): pt-BR request → understander (Qwen-Coder-3B, spec JSON only, no code) → planner → writer →
+    bwrap. Gold spec 179/179; with the 3B 72.6%, with 2 send-back rounds (#38) 78.8%. Every failure is the
+    understander reading the request (mostly the wrong formula tree); planner and writer never failed.
+  - Judges (#36 #37): the Qwen-3B first judge is nearly useless (root stage 0.05 on natural failures); Sonnet as
+    final judge, under `RUBRIC.md`, matched the oracle on 60/60 traces and its fixes repaired 39/40 failures.

@@ -134,8 +134,12 @@ def main():
                     help="formula target: one nested expr string, or addressed steps s1 = op(x, y) (ledger #43 A1)")
     ap.add_argument("--grammar-mask", action="store_true",
                     help="eval only (--lora): greedy over tokens that keep a valid spec prefix (ledger #43 A0)")
+    ap.add_argument("--token-scores", action="store_true",
+                    help="eval only (--lora): also save per generated token [id, logprob, entropy, margin] from the raw "
+                         "logits (ledger #46 saci-code signals); greedy text unchanged")
     a = ap.parse_args()
     assert a.lora or not a.grammar_mask, "--grammar-mask is an eval of a saved adapter: pass --lora"
+    assert a.lora or not a.token_scores, "--token-scores is an eval of a saved adapter: pass --lora"
     from peft import LoraConfig, PeftModel, get_peft_model
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -148,6 +152,7 @@ def main():
     else:                                                # eval only: name of the trained arm, + mask and its format
         tag = os.path.basename(os.path.dirname(os.path.normpath(a.lora)))
         tag += ("_gm_st" if st else "_gm") if a.grammar_mask else ""
+        tag += "_tok" if a.token_scores else ""
     odir = os.path.join(a.out, tag)
     if not a.lora:
         os.makedirs(odir, exist_ok=True)
@@ -166,9 +171,9 @@ def main():
         os.makedirs(odir, exist_ok=True)
         model = PeftModel.from_pretrained(model, a.lora).merge_and_unload().eval()
         res = evaluate(model, tok, im_end, json.load(open(os.path.join(a.eval_dir, "requests.json"))), dev,
-                       MAX_NEW[a.spec_format], a.spec_format if a.grammar_mask else None)
+                       MAX_NEW[a.spec_format], a.spec_format if a.grammar_mask else None, a.token_scores)
         res.update({"tag": tag, "lora": a.lora, "eval_dir": a.eval_dir, "spec_format": a.spec_format,
-                    "grammar_mask": a.grammar_mask})
+                    "grammar_mask": a.grammar_mask, "token_scores": a.token_scores})
         json.dump(res.pop("raws"), open(os.path.join(odir, "raws.json"), "w"), ensure_ascii=False, indent=0)
         json.dump(res, open(os.path.join(odir, "result.json"), "w"), indent=1, ensure_ascii=False)
         print(json.dumps(res, ensure_ascii=False), flush=True)
@@ -277,7 +282,7 @@ def grammar_mask(tok, im_end, n_prompt, steps, ks=(64, 1024)):
     return Mask()
 
 
-def evaluate(model, tok, im_end, evalq, dev, max_new=120, gm=None):
+def evaluate(model, tok, im_end, evalq, dev, max_new=120, gm=None, ts=False):
     """gm: None = plain greedy; "expr"/"steps" = greedy under the grammar mask of that spec format.
     Under the mask, ms includes the mask's CPU time (not comparable with plain ms), and a forced token changes what
     the model conditions on afterwards: "failures fixed by the mask" bounds the FORM failures, it is not a count."""
@@ -291,12 +296,24 @@ def evaluate(model, tok, im_end, evalq, dev, max_new=120, gm=None):
             out = model.generate(input_ids=ids, attention_mask=torch.ones_like(ids), max_new_tokens=max_new,
                                  do_sample=False, eos_token_id=im_end, pad_token_id=tok.pad_token_id,
                                  repetition_penalty=1.0, temperature=None, top_p=None, top_k=None,
-                                 logits_processor=[mask] if mask else None)
+                                 logits_processor=[mask] if mask else None,
+                                 **({"output_logits": True, "return_dict_in_generate": True} if ts else {}))
             # plain greedy: the model's generation_config sets repetition_penalty 1.05 (hits repeated ops in trees)
             torch.cuda.synchronize()
             ms = round(1000 * (time.perf_counter() - t1), 1)
+            tok_rows = None
+            if ts:                                       # raw logits (before any processor), one row per new token
+                lp = torch.stack(out.logits, 0)[:, 0].float().log_softmax(-1)
+                out = out.sequences
+                chosen = out[0, ids.shape[1]:ids.shape[1] + lp.shape[0]]
+                top2 = lp.topk(2, -1).values
+                ent = -(lp.exp() * lp).sum(-1)
+                clp = lp.gather(-1, chosen[:, None])[:, 0]
+                tok_rows = [[int(t), round(float(c), 4), round(float(e), 4), round(float(m), 4)]
+                            for t, c, e, m in zip(chosen, clp, ent, top2[:, 0] - top2[:, 1])]
             raw = tok.decode(out[0, ids.shape[1]:], skip_special_tokens=True).strip()
-            raws[q["id"]] = {"raw": raw, "ms": ms, **({"gm_forced": mask.forced, "gm_miss": mask.miss} if mask else {})}
+            raws[q["id"]] = {"raw": raw, "ms": ms, **({"gm_forced": mask.forced, "gm_miss": mask.miss} if mask else {}),
+                             **({"tok": tok_rows} if ts else {})}
             try:
                 exact = E.canon_spec(json.loads(raw)) == q["gold"]   # steps -> nested expr; else unchanged
             except json.JSONDecodeError:

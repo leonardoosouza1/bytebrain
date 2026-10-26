@@ -40,7 +40,7 @@ problem (I/O examples, or a name / description)
 
 | piece | result | artefact |
 |---|---|---|
-| planner (learned address, 149k) + byte writer d32 (13k) | 100% pass on test_a, len3–6, 3/3 seeds | `bytewriter18/*.json` |
+| planner (learned address, 149k) + byte writer d32 (13k) | 100% pass on test_a, len3–6, 3/3 seeds [erratum review #44: 3 writer seeds on the best planner seed (4); planner len6 over 7 seeds = mean .76, one at .13] | `bytewriter18/*.json` |
 | address is what gives length | plain byte seq2seq 190k, no address: len6 2% | `plain_bytelm/*.json` |
 | main calling dependent functions, full 15-op calculator | 100%, 3/3 seeds (interleaved plan) | `multifn_il/*.json` |
 | main as call tree (compose) | calls8 93–100% (3 seeds) | `compose/*.json` |
@@ -58,6 +58,13 @@ says "a tiny specialist with a learned address beats a 3000x bigger generalist i
 | len2 | 67% | 13% | 100% / 40% |
 | len3 | 43% | 3% | 100% / 33% |
 | len4 | no result recorded (the run was never written down; review #44 §1.3) | | |
+
+[Erratum 10-26, v2 harness `gradsearch_v2/repro_legacy`, legacy flags reproduce this table exactly on len2 (fit 0.667,
+strict 0.133, mean apps 94548.33): the "hidden" column was graded STRICT (intermediate list state must match). The
+problem only gives I/O; graded on output only, the same len2 run gives derive 53% and random 80%. Ambiguity, exact
+enumeration on len2: on average 325 programs fit the 8 examples, and 312 of them are output-equivalent on the 40
+hidden inputs. Of the programs that fit, 80% are right on hidden I/O, for both arms. Reading 1 below was mostly the
+strict grade.]
 
 Reading:
 1. 8 examples under-determine the program: many programs fit 8 and fail 40 (random fits 100% but is right 33–40%).

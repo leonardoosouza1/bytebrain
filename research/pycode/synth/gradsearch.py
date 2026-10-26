@@ -11,6 +11,13 @@ Arms (all see the same problem; random gets the derive_only unit-application bud
   rand          random discrete programs, same budget as derive_only; also run to the full budget to count fits
   guess_only    argmax of the guess, 0 steps                                 (only if --guess-source != none)
   guess_derive  Adam steps starting from the guess logits                    (only if --guess-source != none)
+  guess_sample  programs sampled per slot from softmax(guess logits), same unit-application budget as guess_derive:
+                the control for "the derivative points the way" vs "searching near the guess" (repair = resampling,
+                51.75 = 51.75 on 10-22)                                       (only if --guess-source != none)
+  guess_derive_soft  as guess_derive but sharpness annealed t0 -> t1 like derive_only (secondary arm, declared before the run)
+  guess_derive runs at constant sharpness t1 (warm start); every derive checks its start before the first step.
+  guess_only, guess_derive and guess_sample all see the SAME single guess per problem; derive restarts > 0 add Gumbel
+  noise to it (fixed 10-26 before the first run: restarts used to draw a fresh oracle guess, i.e. more oracle information).
 Guess sources: none (random init), oracle_noisy (true program one-hot + noise: a stand-in for the planner,
 NOT a learned guess), planner (TODO, not implemented).
 
@@ -26,7 +33,17 @@ programs fitting the examples (exact enumeration for len <= --exact-max, else di
 its full budget, capped), and how many of them are io-equivalent on the 40 hidden inputs.
 Results JSON is rewritten after every problem (partial) and every length.
 
-PREDICTION: fill before run
+PREDICTION (registered 10-26 before the run; --guess-source oracle_noisy --guess-noise 1.5, n 40, lens 2,3,4, defaults):
+  Monte Carlo of the oracle guess at noise 1.5 over 47 logits: right slot 0.66, right program .44/.29/.19 (len2/3/4).
+  P1 guess_only fit8 >= .44/.29/.19 (other programs may also fit the 8 examples).
+  P2 (#26 core) guess_derive fit8 >= guess_only + 30 pp at len3 and len4; hidden40_io >= guess_only + 15 pp.
+  P3 guess_sample at the same budget: hidden40_io >= guess_derive (sampling near the guess is the stronger baseline,
+     as resampling tied repair before). If guess_derive wins by > 5 pp, the direction of the derivative is doing work.
+  P4 derive_only with the 4 fixes: len2 fit8 >= 0.9 (old 0.67), still below rand fit8 at len2 and len3.
+  P5 ambiguity, len2 exact enumeration: mean number of programs fitting the 8 examples >= 3.
+  KILL (#26 core): guess_derive hidden40_io <= guess_only + 5 pp at len3 AND len4.
+  The guess is an ORACLE stand-in, not the planner: a pass says "derive can correct a noisy guess", nothing about a
+  learned guess.
 
 Usage: gradsearch.py --out DIR [--n 40 --lens 2,3,4 --steps 300 --restarts 8 --n-ex 8 --guess-source oracle_noisy --guess-noise 1.0]
 """
@@ -236,16 +253,21 @@ def guess_logits(p, n_slots, source, g, noise=0.0, gumbel=0.0, strength=4.0):
     return out
 
 
-def derive(p, n_slots, a, init):
+def derive(p, n_slots, a, init, sharp=False):
     """Adam on slot logits. init(r) -> logits of restart r. Returns the program, unit applications, restart index,
-    steps run per restart, and the loss / |loss_t - loss_{t-25}| trace of the last restart."""
+    steps run per restart, and the loss / |loss_t - loss_{t-25}| trace of the last restart.
+    The start is checked before the first step (a fitting guess is kept, 0 steps). sharp=True: constant sharpness t1
+    (a warm start from a guess; annealing from a soft t0 moved a fitting guess away from the fit in the smoke)."""
     apps, stops = 0, []
     for r in range(a.restarts):
         logits = init(r)
-        opt = torch.optim.Adam(logits, lr=0.3)
         hist, dl = [], []
+        if p.check(decode(logits)):
+            stops.append(0)
+            return decode(logits), apps, r, stops, hist, dl
+        opt = torch.optim.Adam(logits, lr=0.3)
         for s in range(a.steps):
-            loss = soft_loss(p, logits, temp_at(a, s), a.norm, a.crev)
+            loss = soft_loss(p, logits, a.t1 if sharp else temp_at(a, s), a.norm, a.crev)
             opt.zero_grad()
             loss.backward()
             opt.step()
@@ -275,6 +297,22 @@ def random_search(p, n_slots, budget, seed, cap=50):
                 first, apps_first = units, apps
             fits.add(tuple(units))
     return (first, apps_first, fits) if first is not None else (units, apps, fits)
+
+
+def guess_sample(p, logits, budget, seed):
+    """sample programs slot-wise from softmax(guess logits) until one fits the examples or `budget` unit applications
+    are spent (same accounting as random_search). -> (first fit or last tried, apps used)"""
+    if p.check(decode(logits)):                          # the start is checked for free, as in derive
+        return decode(logits), 0
+    g = torch.Generator().manual_seed(seed)
+    probs = torch.stack([lg.detach().softmax(-1) for lg in logits])
+    apps, units = 0, []
+    while apps < max(1, budget):
+        units = [U[i] for i in torch.multinomial(probs, 1, generator=g)[:, 0].tolist() if i < len(U)]
+        apps += max(1, len(units))
+        if p.check(units):
+            break
+    return units, apps
 
 
 def enumerate_fits(p, n_slots):
@@ -354,7 +392,7 @@ def main():
         return
     path = f"{a.out}/gradsearch.json"
     res = {"config": vars(a), "guess_is_oracle": a.guess_source == "oracle_noisy", "eval": {}}
-    arms = ["derive_only", "rand"] + (["guess_only", "guess_derive"] if a.guess_source != "none" else [])
+    arms = ["derive_only", "rand"] + (["guess_only", "guess_derive", "guess_sample", "guess_derive_soft"] if a.guess_source != "none" else [])
     g = random.Random(17)
     for n_slots in map(int, a.lens.split(",")):
         rows = []
@@ -385,12 +423,30 @@ def main():
                 kw = dict(noise=a.guess_noise, strength=a.guess_logit)
                 gl = guess_logits(p, n_slots, a.guess_source, torch.Generator().manual_seed(i), **kw)
                 row["arms"]["guess_only"] = {"units": decode(gl), "apps": 0, "fit": p.check(decode(gl))}
-                g1 = torch.Generator().manual_seed(i)
+                g1 = torch.Generator().manual_seed(10**6 + i)
+
+                def from_guess(r):                             # ONE guess per problem (a planner gives one); restarts
+                    out = []                                   # add Gumbel exploration, never a fresh oracle draw
+                    for lg in gl:
+                        x = lg.detach().clone()
+                        if r > 0 and a.gumbel > 0:
+                            x = x + a.gumbel * (-torch.log(-torch.log(torch.rand(x.shape, generator=g1).clamp(1e-9, 1 - 1e-9))))
+                        out.append(x.requires_grad_())
+                    return out
                 t0 = time.perf_counter()
-                du, dapps, dr, dstops, dh, ddl = derive(p, n_slots, a, lambda r: guess_logits(p, n_slots, a.guess_source, g1, **kw))
+                du, dapps, dr, dstops, dh, ddl = derive(p, n_slots, a, from_guess, sharp=True)
                 row["arms"]["guess_derive"] = {"units": du, "apps": dapps, "restarts": dr, "steps_per_restart": dstops,
                                                "s": round(time.perf_counter() - t0, 2), "fit": p.check(du),
                                                "loss_trace": [round(x, 5) for x in dh], "dloss25_trace": [round(x, 5) for x in ddl]}
+                t0 = time.perf_counter()
+                su, sapps = guess_sample(p, gl, dapps, i)
+                row["arms"]["guess_sample"] = {"units": su, "apps": sapps, "s": round(time.perf_counter() - t0, 2),
+                                               "fit": p.check(su)}
+                g1 = torch.Generator().manual_seed(10**6 + i)        # same Gumbel stream, annealed from t0
+                t0 = time.perf_counter()
+                fu, fapps, fr, fstops, _, _ = derive(p, n_slots, a, from_guess)
+                row["arms"]["guess_derive_soft"] = {"units": fu, "apps": fapps, "restarts": fr, "steps_per_restart": fstops,
+                                                    "s": round(time.perf_counter() - t0, 2), "fit": p.check(fu)}
             rows.append(row)
             res["partial"] = {"len": n_slots, "rows": rows}
             dump(res, path)

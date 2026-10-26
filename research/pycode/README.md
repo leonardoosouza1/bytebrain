@@ -321,3 +321,9 @@ Corpus index alone as generator (contexts capped at 8/16/32/48 bytes): parse 3.1
     matrices memorize; they do not compress.
   - Queue, waiting for his OK to use the GPU again: A0 (mask eval of s5) → A1 smoke + train → A8 s5p2 → A4 after the
     blind set C (A3).
+- **10-26 (evening): runs resumed ("pode continuar").**
+  - A0 (grammar mask on the s5 adapter, no retraining): v2pool belt 441 → 449/593 (74.4 → 75.7%), B 149 → 150/174.
+    Prediction ≥ 78% FAIL. The mask fixes the form but not the tree: a sequential request is cut short at `)`.
+    A whole-vocabulary last tier removed the 4 requests the top-1024 could not hold. CONCEPT-REVIEW.md §7.
+  - A1 smoke (steps format, 30 steps): 16755 pairs, 5 dropped, outputs in steps form, 0/12 exact (the old 30-step
+    smoke also gave 0/12). A1 full is running: train 523 steps, then A, B, v2pool and belts.

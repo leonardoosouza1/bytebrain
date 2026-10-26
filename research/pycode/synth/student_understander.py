@@ -245,7 +245,7 @@ def main():
 def grammar_mask(tok, im_end, n_prompt, steps, ks=(64, 1024)):
     """ledger #43 A0: greedy among the tokens that keep the text a valid spec prefix (E.spec_prefix_ok).
     The argmax is tried first, so the mask equals plain greedy whenever plain greedy is grammatical (topk order among
-    bf16 ties differs from argmax). Then the top 64, then the top 1024, in score order; a token must add visible text
+    bf16 ties differs from argmax). Then the top 64, the top 1024, the whole vocab, in score order; a token must add visible text
     (empty / whitespace-only tokens would stall). None valid -> the scores are left as they are (.miss; the request
     is then not masked and is reported as such). A complete spec admits only <|im_end|>."""
     from transformers import LogitsProcessor
@@ -265,7 +265,8 @@ def grammar_mask(tok, im_end, n_prompt, steps, ks=(64, 1024)):
             elif ok(text, top):
                 keep = top
             else:
-                keep = next((t for k in ks for t in scores[0].topk(k).indices.tolist() if ok(text, t)), None)
+                keep = next((t for k in (*ks, scores.shape[-1]) for t in scores[0].topk(k).indices.tolist()
+                             if ok(text, t)), None)
             if keep is None:
                 self.miss += 1
                 return scores

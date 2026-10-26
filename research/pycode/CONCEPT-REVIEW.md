@@ -218,3 +218,47 @@ Prediction for A0, written before any run: parse failures on v2pool 91 → 0. Be
 - Most forced parses become a wrong tree, not a right one: the mask fixes the form, not the choice of nesting.
 - So the step-list-in-reading-order cases (32) and the wrong-tree cases (41) stay mostly wrong.
 - That gap is what A1 is for.
+
+## 7. A0 result: grammar-masked decoding with the existing s5 adapter (2026-10-26)
+
+Run: `$E2E/a0/run_a0.sh` (`E2E=/media/llm-data/universe-runs/bytebrain-pycode-20261022/e2e`). The masked eval
+covers only the requests whose plain s5 output is not a complete valid spec (`v2pool_ungram` 93, `para_ungram` 13);
+the other requests keep their plain output, so the two arms differ only where plain greedy was ungrammatical.
+Merged raws: `a0/raws_{v2pool,para}_s5_gm.json`; belt logs `a0/run_{v2pool,para}.log`.
+
+Smoke (12 v2pool requests: 6 plain-valid, 6 parse errors):
+- The 6 plain-valid requests come out byte-identical, with 0 forced tokens. The masked arm is like-for-like.
+- The 6 parse errors all become valid specs, and all are wrong. In each one the model wanted a third argument (it
+  read the request as a sequence: "a, then b, then c"), and the mask forced `)` there, which cut the tree short.
+
+Full:
+
+| set | plain s5 belt | masked belt | requests fixed | masked output exact |
+|---|---|---|---|---|
+| v2pool (593) | 441 (74.4%) | **449 (75.7%)** | 8 of 93 | 5 of 93 |
+| B / para (174) | 149 (85.6%) | **150 (86.2%)** | 1 of 13 | 0 of 13 |
+
+- v2pool: 92 of 93 requests had at least one forced token (142 tokens in all).
+- 4 requests were left unmasked (`gm_requests_unmasked` 4): the valid token was not in the model's top 1024.
+  - `)` is valid at those prefixes (checked with `spec_prefix_ok`).
+  - The mask now ends with a whole-vocabulary tier. Rerun on those 4 (`v2pool_unm4`, `a0/eval_unm4.log`): unmasked
+    0, all 4 parse, 0 of 4 pass the belt (`a0/run_unm4.log`). So the v2pool number stays 449.
+  - Mechanism confirmed: the only change was the tier, and it removed every miss.
+- After the mask, the understander is still the root of 144 v2pool failures (152 before).
+
+Predictions (§6 and the second one written before the full run):
+
+| prediction | result | verdict |
+|---|---|---|
+| v2pool parse failures 91 → 0 | 0, after the whole-vocabulary tier (4 were unmasked before it) | PASS |
+| v2pool belt ≥ 78% | 75.7% | **FAIL** |
+| at most 10 of 93 fixed, belt ≤ 76% (written after the smoke) | 8 fixed, 75.7% | PASS |
+
+Reading:
+- The mask fixes the **form** and leaves the **choice of tree**. A parse error here is usually a sequential reading
+  ("take a, then add b, then multiply by c") that does not fit one nested call. Forcing a valid prefix closes the
+  call early, and the meaning is lost.
+- So a grammar mask cannot reach the form failures that matter. It is cheap and safe (it never changes a valid
+  output), so it stays available as a guard; it is not the fix.
+- The fix has to change what the model is asked to write. A sequential request should map to a sequential spec.
+  That is A1: addressed steps `s1 = op(x, y)`, one operation per step in the order the request says it.

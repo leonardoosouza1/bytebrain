@@ -335,7 +335,7 @@ Corpus index alone as generator (contexts capped at 8/16/32/48 bytes): parse 3.1
     A 158/179 (s5 175/179; held frame 'preciso de uma função main que escolha entre' 0/18, answered expr),
     B 139/174 (s5 149/174; 16 dispatch requests answered expr), v2pool 458/593 (s5 441/593; calculators 139/139,
     formulas 319/454 vs >= 80% predicted). Right-ops-wrong-wiring failures rose 39 -> 70 and silent failures
-    40 -> 83; 40/135 failing specs leave a step unused. Steps moved the error from brackets into wiring and
+    40 -> 83 (all 83 use every step; the 40 specs with an unused step are already flagged). Steps moved the error from brackets into wiring and
     made the world switch worse. Ledger #43.
   - gradsearch v2 (#26) len2/3: guess+derive beats guess alone (+27.5 pp io at len3), but sampling near the same
     guess beats derive (+10/+15 pp) at ~1/1000 of the work. GUESS-AND-DERIVE.md §4.

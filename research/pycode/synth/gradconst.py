@@ -187,13 +187,16 @@ def fit_derive(pb, prog, cap, eps=1e-14):
     while apps + 2 + 2 * pb.S <= cap and float(((r.abs()).max())) >= TOL:
         J = torch.autograd.functional.jacobian(resid, c)                     # [N_EX, S]
         A = J.T @ J
-        step = -torch.linalg.solve(A + lam * torch.diag(A.diagonal() + 1e-12), J.T @ r)
+        # a constant with zero derivative (unused by the sampled program, or a flat maxx) gives a zero column of J:
+        # Marquardt's lam * diag(A) alone is then singular, so the damping has a floor (crash found 10-26 at n=200)
+        damp = lam * (A.diagonal() + 1e-9 * (1.0 + float(A.diagonal().max())))
+        step = -torch.linalg.lstsq(A + torch.diag(damp), (J.T @ r)[:, None]).solution[:, 0]
         cand = c + step
         rc = resid(cand)
         apps += 2 * pb.S + 2
         lc = float((rc ** 2).mean()) if torch.isfinite(rc).all() else float("inf")
         if lc < loss:
-            c, r, lam = cand, rc, lam / 3
+            c, r, lam = cand, rc, max(lam / 3, 1e-12)
             hist.append(loss - lc)
             loss = lc
         else:

@@ -88,6 +88,29 @@ guess's own distribution helps more for ~1/1000 of the work. Over discrete op sl
 what solves it. Ambiguity on len2 (exact enumeration): 253 programs fit, 240 output-equivalent. len4 queued.
 Adaptation: derivative on what is continuous (constants, thresholds, the calc ops), sampling on the discrete slots.
 
+**v3, 10-26 night, the derivative where it is native (`synth/gradconst.py`, `gradconst/rep_len{1,2,3}/gradconst.json`).**
+Straight-line programs `s_k = op_k(x, y)` over 8 calc ops, x/y from {a, b, earlier steps, a real constant c_k}; the
+hidden program uses >= 1 constant. 8 examples, graded on 40 hidden inputs (relative error 1e-4). Same noisy-oracle
+guess as v2 (argmax right .735 / .59 / .42). Discrete op and wiring: sampled near the guess. Constants: start at 1.0,
+then fitted by Levenberg–Marquardt (derivative) / (1+1)-ES (no derivative) / random draws, at the same budget of
+program executions. n = 200 per length; the first 40 rows are the first run, identical row by row.
+
+| len | sample + derive | sample + ES | sample + random | all soft (derive) | guess only | constant answer |
+|---|---|---|---|---|---|---|
+| len1 io | **.955** | .895 | .02 | .59 | .005 | .20 |
+| len2 io | **.905** | .735 | .035 | .385 | 0 | .11 |
+| len3 io | **.795** | .465 | .03 | .22 | .005 | .055 |
+| len3 median executions | 229.5 | 2851.5 | 6000 (cap) | 6011 | 1 | 0 |
+| len3 median wall / problem | 26 ms | 218 ms | 507 ms | 400 ms | | |
+
+Reading: this is his loop working. "Chuta" = sample the discrete program near the guess; "deriva até |Δ| quase não
+muda" = LM on the constants until the residual is under tolerance. The derivative beats derivative-free search at the
+same budget (+17 pp len2, +33 pp len3, 12x fewer executions at len3) and the gap grows with length. All-soft (derive
+the op choice too) loses by 57 pp at len3: v2's lesson holds — discrete by sampling, continuous by derivative.
+Where it fails: the derivative is zero on flat regions (`maxx(a, c)` with c below every input: LM cannot move c);
+constants identifiable only as a sum fit the 8 examples and miss the hidden ones (len3 fit .85 vs io .795).
+Limits: the guess is an oracle stand-in; synthetic formulas; CPU, milliseconds, not microseconds yet.
+
 ## 5. Next steps, in order (his idea first)
 
 1. Fix/adapt the derive loop: anneal T, normalise loss, Gumbel noise per restart, simplicity prior; rerun len2–4.
@@ -104,6 +127,9 @@ Adaptation: derivative on what is continuous (constants, thresholds, the calc op
    constants / derive everything (soft ops + constants). Problems: formulas with 1-2 constants (unit conversions,
    'a vezes 1.8 mais 32'), 8 examples, 40 hidden. Same executor also repairs WIRING (the A1 failure) whenever a
    request carries examples.
+   **Built and run 10-26 night (v3 in §4): PASS on all four registered predictions.** Next: replace the oracle guess
+   by the real understander/planner output (A1 steps spec) and the 8 examples by examples the request carries
+   ("a vezes 1.8 mais 32" → constants 1.8, 32 fitted, not guessed); then batch the LM loop on GPU (step 4).
 
 ## 6. Review 2026-10-26 (gaps found, nothing rerun)
 

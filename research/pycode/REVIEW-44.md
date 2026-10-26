@@ -109,6 +109,8 @@ every GPU slot, not after.
 | same | τ switched by regime | does not pay (+0.11%) |
 | saci BTC volatility | evolved bank [1, 17, 120, 2000, 20000] | +2.1 pp R² over the hand timeframes |
 | saci cells by BPTT | LTC / GRU / leaky | tie 53.6%; CfC 47.3 ± 5.1, unstable |
+| pycode bridge_cpu45 (10-26 rerun, 3 seeds, lr grid 1e-3..2e-2) | K=0 / K=48 wait steps: gru, cfc_bank, cfc_tau1, learned τ, stress-gated (opens on \|c − s\|) | K=0 test_a gru .993, bank .823, learned .774, stress .820. K=48: gru .942, every CfC arm ≤ .027 and fails to fit TRAIN. Stress on \|c − s\| opens during the wait (PAD input ≠ held state) and overwrites; optimizer shut the slow groups. KILL for 'fixed huge τ holds the data' |
+| same, FAILED-ADAPT (registered, running 10-26) | cfc_gate: stress read from the INPUT (one gate per τ group); rival: bank at 4× steps | pending |
 
 Why the pycode test could not show a benefit (agent D, lengths re-derivable from the data): sequences are ≤ 21
 tokens in train, so the τ = 64 and 128 groups barely move in one sequence; and the leak is a fixed average, not a

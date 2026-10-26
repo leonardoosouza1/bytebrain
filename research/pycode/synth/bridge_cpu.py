@@ -35,6 +35,23 @@ still recurrent through bb, so it can hold some memory). P4 K=48 cfc_stress >= c
 counted only on a metric where cfc_bank < 95%. P5 K=0 gru within 5 pp of the best tau arm on test_a. KILL for "fixed huge tau holds the
 data" here: K=48 cfc_bank <= cfc_tau1 + 5 pp.
 
+FAILED-ADAPT of #45 (2026-10-26, registered before any run). Result above: at K=48 every CfC arm fails to fit even
+train (train pass1 <= .08, loss 1.0-1.7 vs .03 at K=0) while gru fits (train .999, test_a .942). Own-bug check: mask,
+prefix and grader are shared with gru (which fits); K=0 is unchanged. Mechanism hypothesis H1 (write/hold coupling): a
+fixed leak writes and forgets at the same rate 1/tau, so a slow group absorbs only ~n_name/tau of the name and the 48
+wait steps then pull it toward c(PAD, s); the stress gate cannot help because |c - s| is LARGE during the wait (c comes
+from the PAD input), so opening on mismatch overwrites the memory (learned b went to -9..-11 on the slow groups: the
+optimizer kept them shut). Rival H2: same cell, only the 1200-step budget is short. New arm and test:
+  cfc_gate  same bank; his #8 "holds unless stressed" with the stress read from what comes IN, not from |c - s|:
+            rate_g = 1/tau_g + (1 - 1/tau_g) * sigmoid(w_g . b + c_g), one gate per group from the backbone b
+            (+1032 params, within 3%), init w=0, c=-4 (closed); no weight decay, 10x lr, like the stress gates
+  H2 test   cfc_bank K=48 with --steps 4800 (4x), lr 6e-3 (its K=48 best)
+A1 K=48 cfc_gate test_a >= .80 (3 seeds, 1200 steps). A2 K=48 cfc_bank 4800 steps test_a <= .10 (budget is not the
+cause). A3 K=0 cfc_gate test_a >= K=0 cfc_bank - 5 pp. A4 cfc_gate mean gate on name inputs > 3x mean gate on the
+wait inputs (it learned to write on input and hold on PAD). KILL of H1: cfc_gate K=48 <= cfc_bank K=48 + 10 pp,
+or cfc_bank 4800 steps >= .50. Positive control before: cfc_bank K=0 seed 0 lr 1e-2 --no-extend --seeds 1 must give
+test_a 0.8328 (the gate code must not move the old arms).
+
 Usage: bridge_cpu.py smoke --out DIR
        bridge_cpu.py arm --arm NAME --out DIR [--steps 1200 --threads 2 --delay 0 --lrs 1e-3,3e-3]
 """
@@ -61,7 +78,7 @@ OPS = list(PARAM) + list(KARG) + list(LOOP) + list(PLAIN)
 FINS = ["", "sum", "max", "len", "first", "count_gt"]
 SYM = ["<pad>", "<sep>", "<eos>"] + [f"op:{o}" for o in OPS] + [f"d:{n}" for n in NUMS] + [f"fin:{f}" for f in FINS]
 PAD, SEP, EOS = 0, 1, 2
-ARMS = ["tabs", "trope", "gru", "cfc_bank", "cfc_tau1", "cfc_learn", "cfc_stress"]
+ARMS = ["tabs", "trope", "gru", "cfc_bank", "cfc_tau1", "cfc_learn", "cfc_stress", "cfc_gate"]
 MAX_OUT = 20                                   # 6 units x 2 + final 2 + eos = 15
 
 
@@ -229,6 +246,11 @@ class CfC(nn.Module):
             self.raw = nn.Parameter(torch.logit(self.inv_tau.clamp(max=0.99)))
         if mode == "stress":                    # per group: opens when the mismatch is large; starts closed
             self.sa, self.sb = nn.Parameter(torch.full((self.g,), 4.0)), nn.Parameter(torch.full((self.g,), -8.0))
+        if mode == "gate":                      # per group: opens on what the backbone reads; starts closed
+            self.wg = nn.Linear(h, self.g)
+            nn.init.zeros_(self.wg.weight)
+            nn.init.constant_(self.wg.bias, -4.0)
+        self.rates = None                       # set to [] to record the leak rate per step (diagnostic)
 
     def forward(self, x):
         e = self.emb(x)
@@ -244,8 +266,13 @@ class CfC(nn.Module):
                 mis = (c - s).abs().view(-1, self.g, self.h // self.g).mean(-1)
                 rate = torch.sigmoid(self.sa * mis + self.sb).repeat_interleave(self.h // self.g, -1)
                 rate = self.inv_tau + (1 - self.inv_tau) * rate
+            elif self.mode == "gate":
+                rate = torch.sigmoid(self.wg(b)).repeat_interleave(self.h // self.g, -1)
+                rate = self.inv_tau + (1 - self.inv_tau) * rate
             else:
                 rate = self.inv_tau
+            if self.rates is not None:
+                self.rates.append(rate.expand(x.shape[0], self.h).view(-1, self.g, self.h // self.g).mean(-1))
             s = s + (c - s) * rate
             out.append(s)
         return self.head(torch.stack(out, 1))
@@ -258,7 +285,8 @@ def make(arm, V, delay=0):
         return Gru(V)
     if arm == "cfc_tau1":
         return CfC(V, [1.0] * 8)
-    return CfC(V, [2.0 ** i for i in range(8)], mode={"cfc_bank": "fixed", "cfc_learn": "learn", "cfc_stress": "stress"}[arm])
+    return CfC(V, [2.0 ** i for i in range(8)],
+               mode={"cfc_bank": "fixed", "cfc_learn": "learn", "cfc_stress": "stress", "cfc_gate": "gate"}[arm])
 
 
 def nonemb(net):
@@ -355,7 +383,7 @@ def evaluate(net, data, names):
 def train(arm, data, seed, lr, steps, batch=48):
     torch.manual_seed(seed)
     net = make(arm, data.vocab, data.delay)
-    nd = {"raw", "sa", "sb"}                               # tau / stress gates: no decay toward rate 0.5
+    nd = {"raw", "sa", "sb", "wg.weight", "wg.bias"}       # tau / stress / input gates: no decay toward rate 0.5
     groups = [{"params": [p for n, p in net.named_parameters() if n not in nd]}]
     if any(n in nd for n, _ in net.named_parameters()):
         groups.append({"params": [p for n, p in net.named_parameters() if n in nd], "weight_decay": 0.0, "lr_mult": 10.0})
@@ -386,7 +414,25 @@ def train(arm, data, seed, lr, steps, batch=48):
         info["learned_rate_per_group"] = [round(v, 4) for v in torch.sigmoid(net.raw).view(net.g, -1).mean(1).tolist()]
     if hasattr(net, "sa"):
         info["stress_a"], info["stress_b"] = [round(v, 3) for v in net.sa.tolist()], [round(v, 3) for v in net.sb.tolist()]
+    if isinstance(net, CfC):
+        info["rate_by_input"] = rate_by_input(net, data, data.sets["val"])
     return net, info
+
+
+@torch.no_grad()
+def rate_by_input(net, data, tasks):
+    """mean leak rate per tau group, split by what the cell reads: name tokens, wait (delay PAD) inputs, SEP + plan."""
+    seqs = [data.seq(t) for t in tasks]
+    x = batchify(seqs)[:, :-1]
+    net.rates = []
+    net(x)
+    r, net.rates = torch.stack(net.rates, 1), None          # [B, L, g]
+    kind = torch.full(x.shape, -1)
+    for row, t in enumerate(tasks):
+        n = len(data.name_ids(t))
+        kind[row, :n], kind[row, n:n + data.delay], kind[row, n + data.delay:len(seqs[row]) - 1] = 0, 1, 2
+    return {name: [round(v, 4) for v in r[kind == k].mean(0).tolist()] if bool((kind == k).any()) else None
+            for k, name in enumerate(("name", "wait", "plan"))}
 
 
 def cmd_smoke(a):

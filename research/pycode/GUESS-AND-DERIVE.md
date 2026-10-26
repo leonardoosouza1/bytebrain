@@ -109,11 +109,30 @@ program executions. n = 200 per length; the first 40 rows are the first run, ide
 
 Reading: this is his loop working. "Chuta" = sample the discrete program near the guess; "deriva até |Δ| quase não
 muda" = LM on the constants until the residual is under tolerance. The derivative beats derivative-free search at the
-same budget (+17 pp len2, +33 pp len3, 12x fewer executions at len3) and the gap grows with length. All-soft (derive
+same budget (+17 pp len2, +33 pp len3, 12x fewer executions at len3) and the gap grows with length. [Erratum 10-26 19:06: ES was starved by its cap; tuned, the gap is +7 / +10.5 pp and ~2x fewer executions — see v3.1 below.] All-soft (derive
 the op choice too) loses by 57 pp at len3: v2's lesson holds — discrete by sampling, continuous by derivative.
 Where it fails: the derivative is zero on flat regions (`maxx(a, c)` with c below every input: LM cannot move c);
 constants identifiable only as a sum fit the 8 examples and miss the hidden ones (len3 fit .85 vs io .795).
 Limits: the guess is an oracle stand-in; synthetic formulas; CPU, milliseconds, not microseconds yet.
+
+**v3.1, 10-26 19:06 — erratum to v3 (`gradconst31/run_len{1,2,3}`).** A code review of v3 found that ES was starved:
+every fitter stopped at the grade tolerance, LM gave a wrong program up early while ES spent its whole 900-execution cap
+on each program, so ES tried 5-14x fewer programs. v3.1 fixes that (fit to 1e-7, ES restarts, separate generators,
+constant-output problems removed) and picks each arm's per-program cap on a disjoint dev set (derive 100, ES 200).
+n = 200 per length; 156/178/183 of the problems are the same as v3's.
+
+| len | sample + derive | sample + ES | sample + random | all soft (derive) | guess only | best baseline |
+|---|---|---|---|---|---|---|
+| len1 io | .980 | **.995** | .025 | .845 | 0 | 0 |
+| len2 io | **.950** | .880 | .020 | .620 | 0 | 0 |
+| len3 io | **.820** | .715 | .020 | .300 | .005 | .005 |
+| len3 paired (only this arm right) | 31 | 10 | | | | |
+| len3 median executions, both solved | 98 | 201 | | | | |
+| len3 median wall / problem | 57.5 ms | 87.5 ms | | | | |
+
+Reading, corrected: the derivative still beats derivative-free search at the same budget, and the gap still grows with
+length (−1.5, +7, +10.5 pp), but it is a third of what v3 showed (+33 pp at len3), and the cost advantage is ~2x, not
+12x. Registered predictions: Q1–Q4 PASS (Q2 by 0.5 pp), Q5 (cost ≤ 1/5) FAIL at len3, KILL not triggered.
 
 ## 5. Next steps, in order (his idea first)
 

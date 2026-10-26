@@ -110,7 +110,8 @@ every GPU slot, not after.
 | saci BTC volatility | evolved bank [1, 17, 120, 2000, 20000] | +2.1 pp R² over the hand timeframes |
 | saci cells by BPTT | LTC / GRU / leaky | tie 53.6%; CfC 47.3 ± 5.1, unstable |
 | pycode bridge_cpu45 (10-26 rerun, 3 seeds, lr grid 1e-3..2e-2) | K=0 / K=48 wait steps: gru, cfc_bank, cfc_tau1, learned τ, stress-gated (opens on \|c − s\|) | K=0 test_a gru .993, bank .823, learned .774, stress .820. K=48: gru .942, every CfC arm ≤ .027 and fails to fit TRAIN. Stress on \|c − s\| opens during the wait (PAD input ≠ held state) and overwrites; optimizer shut the slow groups. KILL for 'fixed huge τ holds the data' |
-| same, FAILED-ADAPT (registered, running 10-26) | cfc_gate: stress read from the INPUT (one gate per τ group); rival: bank at 4× steps | pending |
+| same, adapt 1 (10-26 18:44) | cfc_gate: rate = 1/τ + (1 − 1/τ)·σ(wg·b), stress read from the INPUT; rival: bank at 4× steps | K=48 gate .103, bank-4× .123; gate K=0 .066 (breaks with no delay: own bug, the 10× lr of the scalar gates copied onto the wg matrix) |
+| same, adapt 3 (lr fixed, 10-26 18:59) | cfc_gate (floor 1/τ) vs cfc_hold: rate = σ(wg·b + c_g), NO floor | K=0 gate .937, hold .893 (bank .823). K=48 **hold .743** (.80/.56/.87), gate .017, GRU .942. Learned rates: 2 of 8 groups go to 0.000 during the wait, ~1 elsewhere = a learned 'freeze until something new comes in'. The floor is what kills holding |
 
 Why the pycode test could not show a benefit (agent D, lengths re-derivable from the data): sequences are ≤ 21
 tokens in train, so the τ = 64 and 128 groups barely move in one sequence; and the leak is a fixed average, not a

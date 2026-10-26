@@ -89,9 +89,12 @@ def main():
     B = {i: bank(raws[i]["tok"]) for i in ids}
     res = {"n": len(ids), "fail": int(y.sum()), "silent_fail": int((y & ~flag).sum())}
     silent = ~flag                                       # silent failures vs all passes (passes carry no flag)
+    noflag = np.array([not tr[i]["flags"] for i in ids])  # stricter: no flag of any kind (exec flags too)
+    res["noflag_fail"] = int((y & noflag).sum())
 
     def report(name, s):
-        res[name] = {"auroc": auroc(s, y), "auroc_silent": auroc(s[silent], y[silent])}
+        res[name] = {"auroc": auroc(s, y), "auroc_silent": auroc(s[silent], y[silent]),
+                     "auroc_noflag": auroc(s[noflag], y[noflag])}
 
     report("S0_flags", flag.astype(float))
     nll = np.array([B[i][:, 0 * len(TAUS)].sum() for i in ids])          # tau=1 EMA = the raw signal
@@ -109,8 +112,9 @@ def main():
     s3, models = cv_scores(X3, y)
     report("S3_bank_cv", s3)
     report("P_length", np.array([len(raws[i]["tok"]) for i in ids], float))
+    # request text only: the trace's "world" is the gold world, so it is not a request feature (review 10-26)
     Xq = np.array([[len(rq[i]["text"]), rq[i]["text"].count("("), rq[i]["text"].count("["),
-                    float("main" in rq[i]["text"]), float(tr[i]["world"] == "expr")] for i in ids])
+                    float("main" in rq[i]["text"])] for i in ids])
     sq, _ = cv_scores(Xq, y)
     report("Q_request_cv", sq)
 

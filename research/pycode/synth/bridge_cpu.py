@@ -52,6 +52,36 @@ wait inputs (it learned to write on input and hold on PAD). KILL of H1: cfc_gate
 or cfc_bank 4800 steps >= .50. Positive control before: cfc_bank K=0 seed 0 lr 1e-2 --no-extend --seeds 1 must give
 test_a 0.8328 (the gate code must not move the old arms).
 
+FAILED-ADAPT 2 of #45 (2026-10-26 18:40, registered before any run). Adapt 1 result (3 seeds, mean test_a): K=48
+cfc_gate .103 (train .28) vs cfc_bank .013: A1 FAIL, KILL of H1 TRUE (.103 <= .013 + .10). The gate writes on the name
+and holds on the wait in the slow groups (tau 32-128: name rate 10-33x the wait rate), and the name reaches the plan
+(name_info 14-21 nats, true name better in >= 99.5%), yet train stays < .34. Mechanism H3 (holder capacity): the
+cfc_gate rate is 1/tau_g + (1 - 1/tau_g) * gate, so it can only RAISE the leak above the floor 1/tau_g; a group never
+holds longer than its tau. Over 48 wait steps tau=128 keeps (1-1/128)^48 = .69, tau=64 .47, tau=32 .22, tau<=16 < .05:
+2-3 of 8 groups (32-48 of 128 units) carry the name through the wait, while the GRU update gate can hold on every
+unit (gru K=48 .942). cfc_learn K=48 (one static rate per unit, no floor) moved the slow rates UP (tau=128 group:
+.0078 -> .022-.065): with one static rate, writing wins over holding. New arm:
+  cfc_hold  same cell; rate_g = sigmoid(w_g . b + c_g) per group, NO floor; init w=0, c_g = logit(1/tau_g) (starts as
+            cfc_bank, tau=1 at .99); a group can write (rate -> 1) on the name and hold (rate -> 0, tau -> infinity) on
+            the wait: his "banco de T infinito... só muda se houver um estresse", stress read from the input. +1032
+            params as cfc_gate; same lr grid, 1200 steps, 10x lr and no weight decay on the gate.
+Prediction arithmetic: K=0 cfc_bank is .823 and the GRU pays 5 pp for the delay (.992 -> .942), so the reachable
+K=48 ceiling is ~.77. B1 K=48 cfc_hold test_a >= .70 (3 seeds). B2 on the wait inputs >= 4 of 8 groups hold with
+mean rate < 1/64 (more holders than the floor let cfc_gate have). B3 K=0 cfc_hold test_a >= K=0 cfc_bank - 5 pp
+(.773). KILL of H3: K=48 cfc_hold test_a <= K=48 cfc_gate + 10 pp (.203). Positive control before: the cfc_bank K=0
+repro above (0.8328) with this file.
+
+Own-bug check, adapt 3 (2026-10-26 18:45, registered before any run). Adapt 1 at K=0: cfc_gate test_a .066 (seeds
+.066/.000/.131) vs cfc_bank .823, so the gate arm fails WITHOUT any delay and its K=48 number says nothing about
+holding (A3 FAIL). Adapt 1 H2: cfc_bank K=48 at 4x steps .123 (train .38/.44/.53, still rising): A2 FAIL by 2 pp,
+budget is part of it, KILL-2 (>= .50) not triggered. Suspect (own bug): the 10x lr and no weight decay were copied
+from the 16 scalar stress gates (sa, sb) onto wg, a 128x8 matrix read from b; the gates saturate (K=48 lr 1e-2: rate
+1.0 on groups 6-7 for every input; K=0 seed 1 train .003). Fix: --gate-lr-mult 1 (wg at the base lr, still no decay;
+the scalar raw/sa/sb keep 10x, so every older arm is unchanged). Arms: cfc_gate and cfc_hold at K=0 and K=48, mult 1.
+C1 K=0 cfc_gate and cfc_hold test_a >= .773 (bank - 5 pp: both start at the bank's rates). C2 K=48 cfc_hold >= .70.
+C3 K=48 cfc_gate <= cfc_hold - 10 pp (the 1/tau floor limits holders). KILL of the lr-mult explanation: K=0 cfc_gate
+mult 1 < .50.
+
 Usage: bridge_cpu.py smoke --out DIR
        bridge_cpu.py arm --arm NAME --out DIR [--steps 1200 --threads 2 --delay 0 --lrs 1e-3,3e-3]
 """
@@ -78,7 +108,8 @@ OPS = list(PARAM) + list(KARG) + list(LOOP) + list(PLAIN)
 FINS = ["", "sum", "max", "len", "first", "count_gt"]
 SYM = ["<pad>", "<sep>", "<eos>"] + [f"op:{o}" for o in OPS] + [f"d:{n}" for n in NUMS] + [f"fin:{f}" for f in FINS]
 PAD, SEP, EOS = 0, 1, 2
-ARMS = ["tabs", "trope", "gru", "cfc_bank", "cfc_tau1", "cfc_learn", "cfc_stress", "cfc_gate"]
+ARMS = ["tabs", "trope", "gru", "cfc_bank", "cfc_tau1", "cfc_learn", "cfc_stress", "cfc_gate", "cfc_hold"]
+GATE_LR_MULT = 10.0                            # lr multiplier of the input-gate matrix wg (--gate-lr-mult)
 MAX_OUT = 20                                   # 6 units x 2 + final 2 + eos = 15
 
 
@@ -250,6 +281,11 @@ class CfC(nn.Module):
             self.wg = nn.Linear(h, self.g)
             nn.init.zeros_(self.wg.weight)
             nn.init.constant_(self.wg.bias, -4.0)
+        if mode == "hold":                      # per group, no 1/tau floor: can write (rate -> 1) or hold (rate -> 0)
+            self.wg = nn.Linear(h, self.g)      # starts at the bank: rate = 1/tau_g (tau=1 -> 0.99)
+            nn.init.zeros_(self.wg.weight)
+            with torch.no_grad():
+                self.wg.bias.copy_(torch.logit(torch.tensor(taus, dtype=torch.float).reciprocal().clamp(max=0.99)))
         self.rates = None                       # set to [] to record the leak rate per step (diagnostic)
 
     def forward(self, x):
@@ -269,6 +305,8 @@ class CfC(nn.Module):
             elif self.mode == "gate":
                 rate = torch.sigmoid(self.wg(b)).repeat_interleave(self.h // self.g, -1)
                 rate = self.inv_tau + (1 - self.inv_tau) * rate
+            elif self.mode == "hold":
+                rate = torch.sigmoid(self.wg(b)).repeat_interleave(self.h // self.g, -1)
             else:
                 rate = self.inv_tau
             if self.rates is not None:
@@ -286,7 +324,8 @@ def make(arm, V, delay=0):
     if arm == "cfc_tau1":
         return CfC(V, [1.0] * 8)
     return CfC(V, [2.0 ** i for i in range(8)],
-               mode={"cfc_bank": "fixed", "cfc_learn": "learn", "cfc_stress": "stress", "cfc_gate": "gate"}[arm])
+               mode={"cfc_bank": "fixed", "cfc_learn": "learn", "cfc_stress": "stress", "cfc_gate": "gate",
+                     "cfc_hold": "hold"}[arm])
 
 
 def nonemb(net):
@@ -385,8 +424,10 @@ def train(arm, data, seed, lr, steps, batch=48):
     net = make(arm, data.vocab, data.delay)
     nd = {"raw", "sa", "sb", "wg.weight", "wg.bias"}       # tau / stress / input gates: no decay toward rate 0.5
     groups = [{"params": [p for n, p in net.named_parameters() if n not in nd]}]
-    if any(n in nd for n, _ in net.named_parameters()):
-        groups.append({"params": [p for n, p in net.named_parameters() if n in nd], "weight_decay": 0.0, "lr_mult": 10.0})
+    for names, mult in (({"raw", "sa", "sb"}, 10.0), ({"wg.weight", "wg.bias"}, GATE_LR_MULT)):
+        if any(n in names for n, _ in net.named_parameters()):
+            groups.append({"params": [p for n, p in net.named_parameters() if n in names], "weight_decay": 0.0,
+                           "lr_mult": mult})
     opt = torch.optim.AdamW(groups, lr=lr, weight_decay=0.01)
     r = random.Random(seed + 100)
     tr = data.sets["train"]
@@ -511,7 +552,10 @@ def main():
     ap.add_argument("--lrs", default="1e-3,3e-3")
     ap.add_argument("--no-extend", action="store_true")
     ap.add_argument("--seeds", type=int, default=3)
+    ap.add_argument("--gate-lr-mult", type=float, default=10.0, help="lr multiplier of wg (cfc_gate, cfc_hold)")
     a = ap.parse_args()
+    global GATE_LR_MULT
+    GATE_LR_MULT = a.gate_lr_mult
     torch.set_num_threads(a.threads)
     {"smoke": cmd_smoke, "arm": cmd_arm}[a.cmd](a)
 

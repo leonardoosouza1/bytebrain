@@ -18,11 +18,19 @@ Judges stay off this path. No gold here: the request has no known answer. What i
 Latency per stage in ms; the understander is timed with cuda.synchronize, like the eval, after one untimed warm-up
 generate at load. "run+ref (bwrap)" covers the module and the reference module in one sandbox call.
 
+HTTP front (--http PORT): GET / is a one-page chat (request in, code + checks + latency out); POST /api/belt with
+{"request": "<text>"} returns the answer JSON; GET /health. Bound to 127.0.0.1 only: whoever can call it makes the
+sandbox run generated code. One request at a time (single-threaded server; the GPU model is not thread-safe). Body
+<= 4 KB, request text <= 500 chars, JSON content type required (a cross-site form post cannot send it without CORS,
+and the server sends no CORS headers), Host header must be the loopback address (DNS rebinding).
+
 Usage: serve_belt.py [--lora DIR] [--ckpt DIR] "faça uma função de soma" ["...", ...]
        serve_belt.py --repl              (one request per line on stdin; the model stays loaded)
+       serve_belt.py --http 8140         (http://127.0.0.1:8140/)
 """
 
 import argparse
+import ast
 import json
 import os
 import sys
@@ -77,6 +85,9 @@ class Belt:
         r.update(spec=spec, flags=flags)
         if not b:
             lat["bridge"] = 1000 * (time.perf_counter() - t0)
+            if isinstance(spec, dict) and isinstance(spec.get("expr"), str) and \
+                    any(f["kind"] == "expr_parse_error" for f in flags):
+                r["why"] = why_outside(spec["expr"])
             r["lat_ms"] = {k: round(v, 1) for k, v in lat.items()}
             r["total_ms"] = round(sum(lat.values()), 1)
             r["status"] = "rejected by the validator (no code written)"
@@ -115,6 +126,25 @@ class Belt:
         return r
 
 
+def why_outside(e):
+    """display only (the flag kind stays expr_parse_error for the eval tools): the first part of a rejected expr that
+    is outside the compose world, in words"""
+    try:
+        node = ast.parse(e, mode="eval").body
+    except SyntaxError:
+        return "not a Python expression"
+    for n in ast.walk(node):
+        if isinstance(n, ast.Call) and (len(n.args) != 2 or n.keywords):
+            name = n.func.id if isinstance(n.func, ast.Name) else ast.unparse(n.func)
+            return (f"{name}() is called with {len(n.args)} argument(s); the compose world has 2-argument ops only "
+                    "(e.g. sqrt(a*a + b*b) is hyp(a, b))")
+        if isinstance(n, (ast.BinOp, ast.UnaryOp, ast.BoolOp, ast.Compare)):
+            return "infix operator; ops are calls such as add(a, b)"
+        if isinstance(n, ast.Constant):
+            return f"number {n.value!r}; leaves are a and b only"
+    return "outside the compose world (shape)"
+
+
 def show(r):
     print(f"\n>>> {r['request']}")
     print(f"spec: {r['raw_spec']}")
@@ -126,7 +156,134 @@ def show(r):
             print("   ", p)
     if r["flags"]:
         print("flags:", json.dumps(r["flags"], ensure_ascii=False))
+    if r.get("why"):
+        print("why:", r["why"])
     print(f"status: {r['status']}   latency ms: {json.dumps(r['lat_ms'])}   total {r.get('total_ms')}", flush=True)
+
+
+PAGE = """<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Belt</title>
+<style>
+:root { --bg:#111418; --panel:#1a1f26; --ink:#e6e9ee; --muted:#9aa4b1; --ok:#4cc38a; --bad:#e5604d; --line:#2a313b; }
+body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.45 system-ui, sans-serif; }
+main { max-width:1100px; margin:0 auto; padding:16px; }
+form { display:flex; gap:8px; }
+input { flex:1; min-width:0; padding:10px 12px; background:var(--panel); color:var(--ink); border:1px solid var(--line);
+        border-radius:6px; font:inherit; }
+button { padding:10px 16px; background:#2d6cdf; color:#fff; border:0; border-radius:6px; font:inherit; cursor:pointer; }
+button:disabled { opacity:.5; cursor:wait; }
+.card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px 14px; margin-top:14px; }
+.req { color:var(--muted); }
+pre { white-space:pre-wrap; word-break:break-word; background:#0c0f13; padding:10px; border-radius:6px;
+      font:13px/1.4 ui-monospace, monospace; margin:8px 0; }
+.ok { color:var(--ok); } .bad { color:var(--bad); }
+.lat { color:var(--muted); font-size:13px; }
+</style></head><body><main>
+<form id="f"><input id="q" maxlength="500" placeholder="faça uma função de soma" autofocus><button id="b">gerar</button></form>
+<div id="out"></div>
+</main><script>
+const f = document.getElementById("f"), q = document.getElementById("q"), b = document.getElementById("b"),
+      out = document.getElementById("out");
+function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text; return e; }
+f.addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const text = q.value.trim(); if (!text) return;
+  b.disabled = true;
+  const card = el("div", "card"); card.append(el("div", "req", "> " + text)); out.prepend(card);
+  try {
+    const t0 = performance.now();
+    const res = await fetch("/api/belt", { method: "POST", headers: { "Content-Type": "application/json" },
+                                           body: JSON.stringify({ request: text }) });
+    const r = await res.json();
+    if (!res.ok) { card.append(el("div", "bad", r.error || ("HTTP " + res.status))); return; }
+    card.append(el("div", "", "spec: " + r.raw_spec));
+    if (r.code) card.append(el("pre", "", r.code));
+    if (r.probes) card.append(el("pre", "", r.probes.join("\\n")));
+    if (r.why) card.append(el("div", "bad", "why: " + r.why));
+    if (r.flags && r.flags.length) card.append(el("div", "bad", "flags: " + JSON.stringify(r.flags)));
+    card.append(el("div", r.status === "ok" ? "ok" : "bad", "status: " + r.status));
+    card.append(el("div", "lat", "server ms: " + JSON.stringify(r.lat_ms) + "  total " + r.total_ms +
+                   "  |  round trip " + Math.round(performance.now() - t0) + " ms"));
+  } catch (e) { card.append(el("div", "bad", String(e))); }
+  finally { b.disabled = false; q.select(); }
+});
+</script></body></html>
+"""
+
+MAX_BODY, MAX_TEXT = 4096, 500
+
+
+def serve_http(belt, port, fh):
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
+
+    class Handler(BaseHTTPRequestHandler):
+        def send(self, code, body, ctype="application/json; charset=utf-8"):
+            data = (body if isinstance(body, str) else json.dumps(body, ensure_ascii=False)).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(data)
+
+        def host_ok(self):
+            if self.headers.get("Host") in hosts:
+                return True
+            self.send(421, {"error": "unexpected Host header"})
+            return False
+
+        def do_GET(self):
+            if not self.host_ok():
+                return
+            if self.path == "/":
+                self.send(200, PAGE, "text/html; charset=utf-8")
+            elif self.path == "/health":
+                self.send(200, {"ok": True, "load_s": belt.load_s})
+            else:
+                self.send(404, {"error": "not found"})
+
+        def do_POST(self):
+            if not self.host_ok():
+                return
+            if self.path != "/api/belt":
+                return self.send(404, {"error": "not found"})
+            if self.headers.get_content_type() != "application/json":
+                return self.send(415, {"error": "Content-Type must be application/json"})
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                n = -1
+            if not 0 < n <= MAX_BODY:
+                return self.send(413, {"error": f"body must be 1..{MAX_BODY} bytes"})
+            try:
+                text = json.loads(self.rfile.read(n))["request"]
+                if not isinstance(text, str):
+                    raise TypeError
+            except (ValueError, KeyError, TypeError):
+                return self.send(400, {"error": 'body must be {"request": "<text>"}'})
+            text = text.strip()
+            if not 0 < len(text) <= MAX_TEXT:
+                return self.send(400, {"error": f"request must be 1..{MAX_TEXT} characters"})
+            try:
+                r = belt.answer(text)
+            except Exception as e:                              # keep the loaded model alive
+                print(f"[http] answer failed: {type(e).__name__}: {e}", flush=True)
+                return self.send(500, {"error": f"internal error ({type(e).__name__})"})
+            if fh:
+                fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+                fh.flush()
+            self.send(200, r)
+
+        def log_message(self, fmt, *args):
+            print(f"[http] {fmt % args}", flush=True)
+
+    srv = HTTPServer(("127.0.0.1", port), Handler)
+    print(f"serving http://127.0.0.1:{port}/", flush=True)
+    srv.serve_forever()
 
 
 def main():
@@ -135,6 +292,7 @@ def main():
     ap.add_argument("--lora", default=f"{RUN}/student_s5_s1/lora")
     ap.add_argument("--ckpt", default=f"{RUN}/ckpt")
     ap.add_argument("--repl", action="store_true")
+    ap.add_argument("--http", type=int, default=0, help="serve the chat page and /api/belt on 127.0.0.1:PORT")
     ap.add_argument("--out", default=None, help="JSONL of every answer")
     ap.add_argument("--mem-frac", type=float, default=0.25)
     ap.add_argument("--parity", type=int, default=0,
@@ -152,6 +310,9 @@ def main():
         if diff:
             sys.exit(1)
     fh = open(a.out, "a") if a.out else None
+    if a.http:
+        serve_http(belt, a.http, fh)
+        return
     src = sys.stdin if a.repl else a.requests
     for line in src:
         text = line.strip()

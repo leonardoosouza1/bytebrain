@@ -147,9 +147,9 @@ understander trigger it; the request is re-asked with the validator's message ap
 | V0b | `train`: save planners + writer, reproduce known numbers | DONE — 133.6 s, dispatch 100% test_comb/len4/len8/full, compose test_same 1.0 calls4 1.0 calls8 0.933 |
 | V0c | `run`: gold understander + trained planner/writer | DONE — 179/179 |
 | V0d | `run`: Qwen 3B understander + trained planner/writer (natural errors) | DONE — 72.6%, every failure rooted in the understander |
-| V1 | `judge`: Qwen 3B judge + Sonnet final judge on natural + injected traces; agreement vs oracle | smoke done; n=30+30 running |
-| V2 | retrain the most-blamed stage (= understander) | running: #34 student (Qwen 0.5B + LoRA transpiler), §11 |
-| V3 | enable send-back channels by measured value | understander send-back ON: 72.6% → 78.8% |
+| V1 | `judge`: Qwen 3B judge + Sonnet final judge on natural + injected traces; agreement vs oracle | DONE (n=30+30, below). Review #44: fix acceptance is gold-gated (a ceiling, not a loop); Sonnet never faced a constant-blamer baseline |
+| V2 | retrain the most-blamed stage (= understander) | V2 as designed CANCELLED (gold-gated). The understander was retrained as #34 (student s5, 74.4% v2pool); A4 = gold-free version, not run |
+| V3 | enable send-back channels by measured value | understander send-back ON: 72.6% → 78.8% (students have no send-back: compare with plain 72.6) |
 | V4 | serving path: `one` subcommand, understander ~0.5 s on GPU + planner/writer ms + bwrap; judges off the hot path | preview built |
 
 ## 10. Honest limits
@@ -192,7 +192,7 @@ The 38 remaining failures, read one by one (`traces_q3b_sb2.jsonl`):
 Conclusion: the belt below the understander is not the bottleneck (planner and writer 100% on whatever spec they
 get). The 3B reads nested Portuguese formulas into trees badly, worst on 4–5 calls. Changing the send-back wording
 did not change the world-switch (identical 78.8%, 175/179 identical answers) — the 3B does not use the message.
-That is his #34: fine-tune a small model to do this transpilation. Running next (see the ledger).
+That is his #34: fine-tune a small model to do this transpilation. Done since (student s5, ledger #34).
 
 ### Judges (V1, his design #36–#37)
 
@@ -215,6 +215,11 @@ Fixes (accepted only if a rerun of the belt with the fix raises the score, no re
 
 Sonnet's `qwen_ok` vs truth: 0.93 (natural), 0.87 (injected). It never approved a wrong Qwen verdict; its misses are
 the other way (called a correct Qwen verdict wrong, 2 + 4 cases), which costs a Sonnet correction, not a wrong label.
+
+Errata (review #44, `REVIEW-44.md` §1.2): every "accepted / repaired" count above was checked against gold
+(`verify_fix` reruns with the answer key), so it is the ceiling of a fix loop, not a loop that can run in
+serving. On the natural set every root is the understander, so a constant "understander" blamer also scores
+root agree 1.0; Sonnet's 1.0 there is not evidence until it is tested on a sample with mixed roots.
 
 Reading:
 - The 3B first judge does not work as a judge here: on natural failures it blames no stage in 17 of 20 (it reports

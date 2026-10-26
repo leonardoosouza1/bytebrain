@@ -57,7 +57,7 @@ says "a tiny specialist with a learned address beats a 3000x bigger generalist i
 |---|---|---|---|
 | len2 | 67% | 13% | 100% / 40% |
 | len3 | 43% | 3% | 100% / 33% |
-| len4 | running | | |
+| len4 | no result recorded (the run was never written down; review #44 §1.3) | | |
 
 Reading:
 1. 8 examples under-determine the program: many programs fit 8 and fail 40 (random fits 100% but is right 33–40%).

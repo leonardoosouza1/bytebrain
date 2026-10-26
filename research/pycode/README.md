@@ -305,10 +305,12 @@ Corpus index alone as generator (contexts capped at 8/16/32/48 bytes): parse 3.1
     unlikelihood (−26 pp), repair (= resampling), derive-from-random, and SVD of byte values.
   - Student s5 on v2pool (593 Sonnet rewrites) passes the belt 441/593 = 74.4%: calculators 138/139, formulas
     303/454. The understander is the root of 152/152 failures.
-  - 87 of the 151 formula failures (58%) use exactly the gold's set of ops. They have the right meaning in the wrong
+  - [Erratum, review #44: the column sums to 85, and that is the op SET; counting repeated ops at most 50 of 151
+    (≤ 33%) match.] 87 of the 151 formula failures (58%) use exactly the gold's set of ops. They have the right meaning in the wrong
     form: arity 42, steps in reading order 32, answered as a calculator 18, infix 17.
   - Cause of the wrong form: the templated training texts say the nesting with parentheses in Portuguese, while
-    natural requests are sequential.
+    natural requests are sequential. [Erratum: 284 of 454 rewrites keep brackets and pass 76.4%; the 170 without
+    pass 50.6%. The direction holds, the "no parentheses" absolute does not.]
   - Opus audit, checked by me:
     - V2 as designed is gold-gated, so it is cancelled. A4 replaces it with a gold-free version.
     - The 3B judge is below a constant "fail" baseline (pass_agree 15/30 vs 20/30). Adapt it (A5); do not drop it.

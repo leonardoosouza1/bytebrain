@@ -330,7 +330,15 @@ Corpus index alone as generator (contexts capped at 8/16/32/48 bytes): parse 3.1
     Prediction ≥ 78% FAIL. The mask fixes the form but not the tree: a sequential request is cut short at `)`.
     A whole-vocabulary last tier removed the 4 requests the top-1024 could not hold. CONCEPT-REVIEW.md §7.
   - A1 smoke (steps format, 30 steps): 16755 pairs, 5 dropped, outputs in steps form, 0/12 exact (the old 30-step
-    smoke also gave 0/12). A1 full is running: train 523 steps, then A, B, v2pool and belts.
+    smoke also gave 0/12).
+  - A1 full (523 steps, `e2e/student_s5st_s1`), belt vs s5, all predictions FAIL:
+    A 158/179 (s5 175/179; held frame 'preciso de uma função main que escolha entre' 0/18, answered expr),
+    B 139/174 (s5 149/174; 16 dispatch requests answered expr), v2pool 458/593 (s5 441/593; calculators 139/139,
+    formulas 319/454 vs >= 80% predicted). Right-ops-wrong-wiring failures rose 39 -> 70 and silent failures
+    40 -> 83; 40/135 failing specs leave a step unused. Steps moved the error from brackets into wiring and
+    made the world switch worse. Ledger #43.
+  - gradsearch v2 (#26) len2/3: guess+derive beats guess alone (+27.5 pp io at len3), but sampling near the same
+    guess beats derive (+10/+15 pp) at ~1/1000 of the work. GUESS-AND-DERIVE.md §4.
 - **10-26 (night): review #44 (4 Opus agents, read-only) — `REVIEW-44.md`.** Re-checked: the "100% len3-6"
   writer sat on the best planner seed (len6 over 7 seeds: mean .76); judge-fix acceptance is gold-gated; Sonnet
   never faced a constant-blamer baseline; 8 runs were never written down (τ-bank CfC lost to GRU, control never

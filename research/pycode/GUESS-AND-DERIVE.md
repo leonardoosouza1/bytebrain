@@ -73,6 +73,21 @@ Reading:
 3. Bug classes to check before calling it a failure (rule 7): sigmoid sharpness T fixed (no annealing), loss scale
    (cumsum/times blow values up), identity slot dominating, lr 0.3 fixed, no noise between restarts.
 
+**v2, 10-26, guess + derive (`synth/gradsearch.py`, `gradsearch_v2/main_l23/gradsearch.json`).** 40 problems per
+length, 8 examples, graded on 40 hidden inputs by output (io). Guess = noisy oracle (true one-hot x4 + N(0, 1.5);
+Monte Carlo: whole program right .44 / .29 / .19 for len2/3/4), one guess per problem, Gumbel noise on restarts.
+
+| len | guess only | guess + derive (sharp start) | guess + sample (same budget) | guess + derive (annealed) | derive only | random |
+|---|---|---|---|---|---|---|
+| len2 io | .475 | .875 | **.975** | .85 | .525 | .775 |
+| len3 io | .40 | .675 | **.825** | .65 | .40 | .425 |
+| len3 median work (apps) | 0 | 3525 | 4 | | | |
+
+Reading: the guess carries the result; the derivative helps it (+27.5 pp at len3) but drawing samples from the
+guess's own distribution helps more for ~1/1000 of the work. Over discrete op slots the gradient direction is not
+what solves it. Ambiguity on len2 (exact enumeration): 253 programs fit, 240 output-equivalent. len4 queued.
+Adaptation: derivative on what is continuous (constants, thresholds, the calc ops), sampling on the discrete slots.
+
 ## 5. Next steps, in order (his idea first)
 
 1. Fix/adapt the derive loop: anneal T, normalise loss, Gumbel noise per restart, simplicity prior; rerun len2–4.

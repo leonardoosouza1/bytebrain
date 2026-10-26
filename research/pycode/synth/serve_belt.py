@@ -220,6 +220,8 @@ def serve_http(belt, port, fh):
     hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
 
     class Handler(BaseHTTPRequestHandler):
+        timeout = 10        # review #48 g4 S2: a client that stalls mid-request no longer blocks the server
+
         def send(self, code, body, ctype="application/json; charset=utf-8"):
             data = (body if isinstance(body, str) else json.dumps(body, ensure_ascii=False)).encode()
             self.send_response(code)

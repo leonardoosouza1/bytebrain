@@ -13,7 +13,7 @@ Bank over 7 files (calc_ref, calc_generated, 5 stdlib modules): 2123 symbols, 62
 | uses(sym) | 0.8 ns slice / 3.5 ns decoded | 23 ns |
 | live locals at line L | 32 ns scope index (1.2 ns per-line CSR, 112 KB) | 640 ns |
 | (scope, 4-bit slot) -> sym | 1.2 ns | - |
-| nibble stream | 0.74 ns/token scalar, 0.07 ns/token SWAR | 31-38 ns/token |
+| nibble stream | 0.74 ns/token scalar, 0.07 ns/token SWAR | ~38 ns/token (py_results.txt: 37.6) |
 | name -> id, 1M names | 30 ns | - |
 
 - Python call overhead dominates: numpy (~200 ns/call) and ctypes (126 ns/call) lose to dict/list

@@ -102,7 +102,7 @@ print(json.dumps(res))
 
 
 def run_many(items):
-    cmd = ["bwrap", "--unshare-all", "--die-with-parent", "--new-session",
+    cmd = ["bwrap", "--unshare-all", "--die-with-parent", "--new-session", "--clearenv",  # review #48 g4 S1
            "--ro-bind", "/usr", "/usr", "--symlink", "usr/lib", "/lib", "--symlink", "usr/lib64", "/lib64",
            "--symlink", "usr/bin", "/bin", "--proc", "/proc", "--dev", "/dev",
            "/usr/bin/python3", "-I", "-S", "-c", RUNNER]

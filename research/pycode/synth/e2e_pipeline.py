@@ -133,7 +133,9 @@ def make_requests(seed=0):
 
 
 RUNNER = r"""
-import io, json, signal, sys
+import io, json, resource, signal, sys
+for _lim, _v in ((resource.RLIMIT_AS, 1 << 30), (resource.RLIMIT_NPROC, 0), (resource.RLIMIT_FSIZE, 1 << 24)):
+    resource.setrlimit(_lim, (_v, _v))     # review #48 g4 S1: no fork, <= 1 GiB, <= 16 MiB per written file
 def _alarm(*_):
     raise TimeoutError
 signal.signal(signal.SIGALRM, _alarm)
@@ -168,10 +170,10 @@ real.write(json.dumps(res))
 
 def run_many(items):
     """items: [(src, [(fn, args), ...])] -> [None | [repr per call]]; None = module failed to load."""
-    cmd = ["bwrap", "--unshare-all", "--die-with-parent", "--new-session",
+    cmd = ["bwrap", "--unshare-all", "--die-with-parent", "--new-session", "--clearenv", "--setenv", "PATH", "/usr/bin",
            "--ro-bind", "/usr", "/usr", "--symlink", "usr/lib", "/lib", "--symlink", "usr/lib64", "/lib64",
            "--symlink", "usr/bin", "/bin", "--proc", "/proc", "--dev", "/dev",
-           "/usr/bin/python3", "-I", "-S", "-c", RUNNER]
+           "/usr/bin/python3", "-I", "-S", "-c", RUNNER]     # --clearenv: review #48 g4 S1 (parent env held a token)
     n_calls = sum(len(c) for _, c in items)
     try:
         p = subprocess.run(cmd, input=json.dumps(items), capture_output=True, text=True,

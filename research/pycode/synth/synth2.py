@@ -173,7 +173,7 @@ def build():
 
 def run_many(items):
     """items [(src, name, nargs)] -> [outputs or None], one bwrap call."""
-    cmd = ["bwrap", "--unshare-all", "--die-with-parent", "--new-session",
+    cmd = ["bwrap", "--unshare-all", "--die-with-parent", "--new-session", "--clearenv",  # review #48 g4 S1
            "--ro-bind", "/usr", "/usr", "--symlink", "usr/lib", "/lib", "--symlink", "usr/lib64", "/lib64",
            "--symlink", "usr/bin", "/bin", "--proc", "/proc", "--dev", "/dev",
            "/usr/bin/python3", "-I", "-S", "-c", RUNNER]

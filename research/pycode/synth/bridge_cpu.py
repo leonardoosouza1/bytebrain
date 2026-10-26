@@ -293,6 +293,7 @@ class CfC(nn.Module):
             with torch.no_grad():
                 self.wg.bias.copy_(torch.logit(torch.tensor(taus, dtype=torch.float).reciprocal().clamp(max=0.99)))
         self.rates = None                       # set to [] to record the leak rate per step (diagnostic)
+        self.force = None                       # (group list, rate): ablation, those groups' rate pinned at every step
 
     def forward(self, x):
         e = self.emb(x)
@@ -315,6 +316,11 @@ class CfC(nn.Module):
                 rate = torch.sigmoid(self.wg(b)).repeat_interleave(self.h // self.g, -1)
             else:
                 rate = self.inv_tau
+            if self.force is not None:
+                gs, v = self.force
+                m = torch.zeros(self.g, dtype=torch.bool)
+                m[list(gs)] = True
+                rate = torch.where(m.repeat_interleave(self.h // self.g), torch.full_like(rate, v), rate)
             if self.rates is not None:
                 self.rates.append(rate.expand(x.shape[0], self.h).view(-1, self.g, self.h // self.g).mean(-1))
             s = s + (c - s) * rate
@@ -547,9 +553,35 @@ def cmd_arm(a):
         json.dump({"grid": {str(k): v[2] for k, v in grid.items()}, "runs": runs}, open(f"{a.out}/arm_{a.arm}_d{a.delay}.json", "w"), indent=1)
 
 
+def cmd_ablate(a):
+    """#45/#8 holder ablation: retrain cfc_hold at the chosen lr per seed, find the groups that hold on the wait
+    (mean wait rate < 1/64), then pin their rate to 1 (they copy the candidate every step = no memory) and, as a
+    control, pin the same number of the highest-wait-rate groups to 1. Nets are saved for later ablations."""
+    data = Data(a.delay)
+    os.makedirs(a.out, exist_ok=True)
+    seed = a.seed
+    net, info = train(a.arm, data, seed, a.lr, a.steps)
+    torch.save(net.state_dict(), f"{a.out}/net_{a.arm}_d{a.delay}_s{seed}.pt")
+    wait = info["rate_by_input"]["wait"]
+    holders = [g for g, r in enumerate(wait) if r < 1 / 64]
+    others = sorted((g for g in range(net.g) if g not in holders), key=lambda g: -wait[g])[:len(holders)]
+    res = {"arm": a.arm, "delay": a.delay, "seed": seed, "lr": a.lr, "steps": a.steps, **info,
+           "holders": holders, "control_groups": others, "eval": {}}
+    for tag, force in (("none", None), ("holders_rate1", (holders, 1.0)), ("control_rate1", (others, 1.0))):
+        net.force = force if force and force[0] else None
+        ev = evaluate(net, data, ["train", "test_a"])
+        res["eval"][tag] = {k: {"pass1": v["pass1"], "block_exact": v["block_exact"], "name_info": v.get("name_info")}
+                            for k, v in ev.items()}
+        print(json.dumps({"seed": seed, "ablation": tag, "groups": force[0] if force else [],
+                          "train": ev["train"]["pass1"], "test_a": ev["test_a"]["pass1"],
+                          "name_info_test_a": ev["test_a"]["name_info"]}), flush=True)
+        json.dump(res, open(f"{a.out}/ablate_{a.arm}_d{a.delay}_s{seed}.json", "w"), indent=1)
+    net.force = None
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["smoke", "arm"])
+    ap.add_argument("cmd", choices=["smoke", "arm", "ablate"])
     ap.add_argument("--arm", choices=ARMS)
     ap.add_argument("--out", required=True)
     ap.add_argument("--steps", type=int, default=1200)
@@ -558,12 +590,14 @@ def main():
     ap.add_argument("--lrs", default="1e-3,3e-3")
     ap.add_argument("--no-extend", action="store_true")
     ap.add_argument("--seeds", type=int, default=3)
+    ap.add_argument("--seed", type=int, default=0, help="ablate: one seed per process")
+    ap.add_argument("--lr", type=float, default=1e-2, help="ablate: lr (adapt4 cfc_hold pick 1e-2)")
     ap.add_argument("--gate-lr-mult", type=float, default=10.0, help="lr multiplier of wg (cfc_gate, cfc_hold)")
     a = ap.parse_args()
     global GATE_LR_MULT
     GATE_LR_MULT = a.gate_lr_mult
     torch.set_num_threads(a.threads)
-    {"smoke": cmd_smoke, "arm": cmd_arm}[a.cmd](a)
+    {"smoke": cmd_smoke, "arm": cmd_arm, "ablate": cmd_ablate}[a.cmd](a)
 
 
 if __name__ == "__main__":

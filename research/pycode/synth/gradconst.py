@@ -55,6 +55,54 @@ the len2 part of v3's P2 is expected to FAIL. Q3 derive >= soft + 10 pp at len3.
 .02 (constant-output problems removed). Q5 cost: on problems both solve, derive's median executions <= 1/5 of ES's at
 every length. KILL (as v3): derive - ES <= 5 pp at len2 AND len3.
 
+v3.2 (10-26 ~20:40, after the Opus re-review #48 g2; registered before any v3.2 run). F: soft_derive at S=3 ran 83 of
+its 100 steps (100 x 72 = 7200 > budget 6000) and the polish got 24 executions instead of 300; now each attempt runs
+min(soft_steps, (budget left - 300) // cost) steps and keeps 300 for the polish. G: ES's give-up (second sigma collapse)
+needs ~410 evaluations, so at the tuned cap 200 it never fired, while LM gave a wrong program up after 5 accepted steps
+gaining < 0.1%: about half of v3.1's +10.5 pp derive - ES at len3 was early give-up, not the derivative direction. ES now
+gives up after 5 windows of 10 evaluations each improving the best loss by < 0.1% (the same |dloss| ~ 0 rule).
+--no-stall turns every give-up off for both fitters (LM and ES spend the per-program cap or fit): the mode that isolates
+the derivative DIRECTION from early stopping. --v31 reproduces v3.1: 20 len1 + 20 len3 rows of gradconst31/run_len*
+identical in every arm and field except wall time (10-26 20:3x). The test problems (seeds 10_000 S + i) are v3.1's, so
+v3.2 rows pair with v3.1 rows problem by problem.
+Protocol: caps re-tuned per mode on the dev set (`tune`, grid 50..1800, n 40, disjoint seeds), a best cap at either edge
+(v3.3; v3.2 said top edge) stops the run; then n 200 per length, lens 1,2,3, both modes, tuned caps.
+PREDICTIONS v3.2 (len3 unless stated; paired bootstrap 95% CI over the 200 problems for every difference):
+  R1 (F) soft_derive io .40-.55 at len3 (v3.1 .30; the review's budget-fitting replay gave .48); len1/len2 within +-5 pp
+     of v3.1 (.845 / .620).
+  R2 (G, stall ON for both) ES io >= v3.1's .715 (giving wrong programs up buys more programs); derive - ES in 0..+10 pp.
+  R3 (no-stall) derive io <= its stall-ON io (LM loses its early give-up); derive - ES in 0..+10 pp.
+  R4 derive >= random + 30 pp at every length in both modes (unchanged mechanism).
+  Verdict on 'the derivative beats derivative-free search on constants': PASS if the stall-ON len3 CI lower bound > 0
+  AND the no-stall len3 CI lower bound > 0 (direction, not early stopping); KILL if both len3 CI upper bounds < +3 pp;
+  else NOT ESTABLISHED (state which mode carries the gap).
+
+v3.3 (10-26 ~20:35, Opus pre-run review of v3.2; NO v3.2 run happened, R1-R4 and the verdict rule carry over):
+  defect 2: v3.2's ES window stall counted windows with ZERO accepted steps as flat, LM counts accepted steps only. Dev
+  probe (seeds 50_000 S + i, 40 per length, ES on the TRUE program, cap 200; scratchpad opus_26v21/probe_es33*.py):
+  io40 of 40 v3.2 rule 30/26/27, v3.3 rule (a window counts only if it accepted a step) 40/34/36 = no-stall 40/34/36
+  (LM cap 100: 39/37/34). Saving on 200 WRONG programs per length: mean executions v3.2 86/92/101, v3.3 184/186/184,
+  no-stall 200. Tried and rejected on dev: an LM-like give-up after 17 / 30 rejected candidates in a row (LM's
+  lam > 1e8 is ~17 rejected trial steps) gives up the TRUE program 38-40 / 31-34 of 40 times (ES's 1/5 rule makes long
+  rejection runs normal). ES_REJECT_RUN stays 0. Consequence: in the stall-ON mode ES almost never gives a wrong program
+  up while LM does (lam > 1e8, 5 flat accepted steps): stall-ON still mixes direction with early stopping, the
+  no-stall mode is the clean test of the direction (as the v3.2 verdict rule already requires).
+  minor: soft_derive's final fit check is charged 1 (as sample_search's); tune flags a best cap at EITHER grid edge.
+  --v31 control after these changes: 20 len1 + 20 len3 rows of gradconst31/run_len* identical (0 diffs, every arm and
+  field except wall time; gradconst33/ctrl_v31_len*, 10-26 20:3x).
+PREDICTIONS v3.3 (len3 unless stated, paired bootstrap 95% CI over 200 problems, caps re-tuned per mode on dev):
+  R1 soft_derive io .40-.55 at len3 (v3.1 .30); len1/len2 within +-5 pp of v3.1 (.845 / .620).
+  R2 (stall ON) ES behaves like v3.1's ES (it gave nothing up at cap 200 then either): ES io .715 +- .05; derive - ES
+     +5..+15 pp (v3.1 +10.5, half of it early give-up per review G).
+  R3 (no-stall) derive io <= its stall-ON io; derive - ES in 0..+10 pp.
+  R4 derive >= random + 30 pp at every length in both modes.
+  Verdict as v3.2: PASS if the no-stall len3 CI lower bound > 0 AND the stall-ON one > 0; KILL if both upper bounds
+  < +3 pp; else NOT ESTABLISHED (say which mode carries the gap).
+  Amendment 10-26 ~20:50 (second Opus review, before any v3.3 result): KILL is decided by the no-stall mode alone
+  (its len3 CI upper bound < +3 pp). In stall-ON, LM still gives up on wrong programs while ES rarely does (dev: ES
+  wrong-program apps ~184 of 200), so stall-ON derive - ES is inflated; it is reported as 'the stall rules as
+  designed', not used for KILL. PASS unchanged (needs both modes).
+
 Usage: gradconst.py --out DIR [--n 40 --lens 1,2,3 --noise 1.5 --budget 6000 --threads 1] | gradconst.py smoke --out DIR
 """
 
@@ -73,6 +121,13 @@ OPS = ("add", "sub", "mul", "div", "avg", "hyp", "maxx", "pct")
 N_EX, N_HID, TOL = 8, 40, 1e-4
 TOL_FIT = 1e-7          # v3.1: fitters iterate past the grade tolerance (review 10-26: stopping at TOL lost hidden io)
 LEGACY = False          # --legacy: the v3 behaviour, kept for the reproduction control
+V31 = False             # --v31: the v3.1 behaviour (no ES stall rule, soft steps overran the budget), reproduction control
+STALL = True            # --no-stall: no fitter gives a program up early (LM and ES both spend the cap or fit)
+POLISH = 300            # soft_derive: executions reserved for the hard-program polish after the soft steps
+ES_WINDOW = "accept"    # v3.3 (Opus review #26 v3.2, defect 2): a stall window counts only if it accepted a step, like
+                        # LM's rule (accepted steps only); "all" = the v3.2 rule (zero-accept windows counted as flat)
+ES_REJECT_RUN = 0       # v3.3 dev probe: > 0 gives a program up after this many rejected candidates in a row (LM's
+                        # lam > 1e8 is ~17 rejected trial steps in a row); 0 = off
 
 
 def op_t(name, x, y):
@@ -228,10 +283,10 @@ def fit_derive(pb, prog, cap, eps=1e-14, c0=None):
             hist.append(loss - lc if LEGACY else (loss - lc) / max(loss, 1e-300))
             loss = lc
         else:
-            lam *= 4
+            lam = lam * 4 if STALL else min(lam * 4, 1e12)    # no-stall: keep trying (bounded so damp stays finite)
             if LEGACY:
                 hist.append(0.0)
-        if lam > 1e8 or (len(hist) >= 5 and max(hist[-5:]) < (eps if LEGACY else 1e-3)):   # his rule: |dloss| ~ 0
+        if STALL and (lam > 1e8 or (len(hist) >= 5 and max(hist[-5:]) < (eps if LEGACY else 1e-3))):   # |dloss| ~ 0
             break
     return c, apps
 
@@ -258,7 +313,11 @@ def fit_es(pb, prog, cap, g):
 
 def fit_es31(pb, prog, cap, g):
     """v3.1 (review 10-26): accept on the same L2 loss LM minimises, iterate to TOL_FIT, and on sigma collapse restart
-    once from the best point with sigma 1; a second collapse gives the program up (ES's own stall rule, like LM's)."""
+    once from the best point with sigma 1; a second collapse gives the program up (ES's own stall rule, like LM's).
+    v3.2 (Opus review g2 G): the sigma floor needs ~410 evaluations, so at the tuned cap 200 ES never gave a program up
+    while LM did after 5 accepted steps gaining < 0.1%: half of v3.1's derive - ES gap was early give-up, not direction.
+    ES now gives up when 5 windows of 10 evaluations in a row each improve the best loss by < 0.1% (relative), the
+    same |dloss| ~ 0 rule as LM's, reachable after 50 evaluations. --no-stall turns every give-up off for both."""
     scale = 1 + pb.y.abs()
 
     def l2_mx(cc):
@@ -270,6 +329,7 @@ def fit_es31(pb, prog, cap, g):
 
     c = torch.ones(pb.S, dtype=torch.float64)
     (best, mx), apps, sig, win, restarts = l2_mx(c), 1, 1.0, [], 0
+    w_best, flat, rej = best, 0, 0
     while apps < cap and mx >= TOL_FIT:
         cand = c + sig * torch.randn(pb.S, generator=g, dtype=torch.float64) * (1 + c.abs())
         lc, mc = l2_mx(cand)
@@ -277,13 +337,23 @@ def fit_es31(pb, prog, cap, g):
         ok = lc < best
         if ok:
             c, best, mx = cand, lc, mc
+        rej = 0 if ok else rej + 1
+        if STALL and not V31 and ES_REJECT_RUN and rej >= ES_REJECT_RUN:
+            break
         win.append(ok)
         if len(win) == 10:                  # 1/5 success rule
-            sig *= 1.5 if sum(win) > 2 else 0.6
+            acc = sum(win)
+            sig *= 1.5 if acc > 2 else 0.6
             win = []
+            if not V31:                     # v3.2 window stall (G); v3.3: a zero-accept window leaves `flat` unchanged
+                if ES_WINDOW == "all" or acc > 0:      # (sigma shrinks there; collapse is the give-up, as LM's lam > 1e8)
+                    flat = flat + 1 if (w_best - best) < 1e-3 * max(w_best, 1e-300) else 0
+                w_best = best
+                if STALL and flat >= 5:
+                    break
         if sig < 1e-9:
             restarts += 1
-            if restarts > 1:
+            if restarts > 1 and (STALL or V31):
                 break
             sig = 1.0
     return c, apps
@@ -347,7 +417,13 @@ def soft_derive(pb, lg, budget, steps, seed, gumbel=1.0, lr=0.3, T=1.0, lr_logit
         opt = torch.optim.Adam(par + [c], lr=lr) if LEGACY else \
             torch.optim.Adam([{"params": par, "lr": lr_logit}, {"params": [c], "lr": lr}])
         cost = 3 * len(OPS) if LEGACY else 3 * len(OPS) * pb.S
-        for _ in range(steps):
+        n_steps = steps
+        chk = 0 if (LEGACY or V31) else 1   # v3.3: the final fit check costs 1, as in sample_search
+        if not (LEGACY or V31):             # v3.2 (review g2 F): 100 x 72 = 7200 > 6000 at S=3, the polish got 24
+            n_steps = min(steps, (budget - apps - POLISH - chk) // cost)
+            if n_steps < 1:
+                break
+        for _ in range(n_steps):
             if apps + (3 if LEGACY else cost) > budget:
                 break
             s = []
@@ -367,9 +443,9 @@ def soft_derive(pb, lg, budget, steps, seed, gumbel=1.0, lr=0.3, T=1.0, lr_logit
             opt.step()
         prog = [(int(par[3 * k].argmax()), int(par[3 * k + 1].argmax()), int(par[3 * k + 2].argmax()))
                 for k in range(pb.S)]
-        cfit, used = fit_derive(pb, prog, min(300, max(0, budget - apps)),           # polish the hard program
+        cfit, used = fit_derive(pb, prog, min(POLISH, max(0, budget - apps - chk)),  # polish the hard program
                                 c0=None if LEGACY else c)                            # v3.1: from the soft constants
-        apps += used
+        apps += used + chk
         if pb.fits(prog, cfit):
             return prog, cfit, apps
         r += 1
@@ -464,6 +540,7 @@ def tune(a):
         best = max(caps, key=lambda k: (out[name][k]["mean"], -k))
         out[name]["best"] = best
         out[name]["best_at_top_edge"] = best == max(caps)
+        out[name]["best_at_bottom_edge"] = best == min(caps)          # v3.3: either edge => extend the grid
     return out
 
 
@@ -480,11 +557,13 @@ def main():
     ap.add_argument("--per-prog-es", type=int, default=0, help="v3.1: own cap for sample_es (0 = --per-prog)")
     ap.add_argument("--caps", default="100,200,300,600,900,1800", help="tune: per-program caps tried per arm")
     ap.add_argument("--legacy", action="store_true", help="v3 behaviour (reproduction control)")
+    ap.add_argument("--v31", action="store_true", help="v3.1 behaviour (reproduction control of gradconst31/run_len*)")
+    ap.add_argument("--no-stall", dest="stall", action="store_false", help="v3.2 split: no fitter gives a program up early")
     ap.add_argument("--soft-steps", type=int, default=100)
     ap.add_argument("--threads", type=int, default=1)
     a = ap.parse_args()
-    global LEGACY
-    LEGACY = a.legacy
+    global LEGACY, V31, STALL
+    LEGACY, V31, STALL = a.legacy, a.v31, a.stall
     torch.set_num_threads(a.threads)
     os.makedirs(a.out, exist_ok=True)
     if a.cmd == "smoke":

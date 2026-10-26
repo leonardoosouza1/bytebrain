@@ -12,6 +12,13 @@ and a gate decides whether the corpus is consulted at all:
           "consult when unsure" from "consult at all"); own torch.Generator, the sampling stream is untouched
   stress24  stress and the corpus match is >= 24 bytes (smoke n=8: stress helped held-out bytes behind a long
           match and hurt those behind an 8-16 byte match; FAILED-ADAPT arm of the stress rule)
+  poe_stress / poe_always  (FAILED-ADAPT after review #48 g1, 10-26): product of experts, the corpus only re-weights
+          what the model proposes, strength grows with the match length; see mix(). lin24t = stress24 mixed at T=1.
+  poe_conf  (mix4b, Opus mix4 review D5) poe_stress with the strength also scaled by the evidence n/(n + kappa): a
+          48-byte match seen once no longer moves the distribution as much as the linear mixer it replaces.
+Gate-closed rows of the poe/lin24t rules return p_model itself (bit-equal, review D6). Per step the total-variation
+change 0.5 |p - p_model|_1 is logged (the minimum chance that the sampled byte differs from the model's): mix3 cost
+~3 pp of term_parses_novel per unit of expected flips per function (review D2), so harm per flip is measured, not assumed.
 Rules are compared on the same seeds; every arm draws the same sampling noise (multinomial consumes the same
 Philox draws whatever p is), so rows are paired across arms. Held-out bits/byte per rule with the same gate.
 Judged by eval_samples.judge (grammar / names / runs), novelty (function not verbatim in the corpus) and copy48
@@ -33,7 +40,8 @@ from eval_samples import ByteLM, CachedGen, cut_function, judge
 
 D = "/media/llm-data/datasets/pycode"
 LENGTHS = (8, 12, 16, 24, 32, 48)
-RULES = ("model", "always", "stress", "anti", "random", "stress24")
+RULES = ("model", "always", "stress", "anti", "random", "stress24", "poe_stress", "poe_always", "lin24t", "poe_conf")
+BASE_GATE = {"poe_stress": "stress", "poe_always": "always", "lin24t": "stress24", "poe_conf": "stress"}
 PROMPT = b"\n\ndef "
 
 
@@ -41,6 +49,7 @@ def gate(rule, pg, tau, rate, rgen, m):
     """Rows where the corpus may be consulted. pg = model distribution the gate reads (sampling temperature)."""
     if rule not in RULES:
         raise ValueError(f"unknown rule {rule}")
+    rule = BASE_GATE.get(rule, rule)
     B = pg.shape[0]
     if rule == "model":
         return torch.zeros(B, dtype=torch.bool, device=pg.device)
@@ -59,8 +68,42 @@ def weight(m, h, kappa, g):
     return torch.where((m > 0) & g, n / (n + kappa), torch.zeros_like(n))
 
 
+def mix(rule, logits, pm, m, h, w, gt, temp, beta, eps):
+    """-> (distribution to sample, per-row strength for the logs).
+    mix3 rules: p = (1 - w) p_model(T=temp) + w p_index (as run in mix3/main.json; kept for reproducibility).
+    poe_*: the corpus only re-weights bytes the model already proposes (orientation, not the answer; review #48 g1
+      D1: a frequent 8-byte context had w ~ .99 and replaced the model by an 8-gram):
+      log p = log p_model(T=1) + b log(p_index + eps), b = beta * min(m, 48) / 48 on gated rows, then temperature.
+    lin24t: the stress24 mixture built at T=1, then temperature (g1 D2: mix3 mixed a T=0.8 model with T=1 counts)."""
+    pi = h / h.sum(1, keepdim=True).clamp(min=1)
+    if rule.startswith("poe"):
+        b = poe_strength(rule, m, w, gt, beta)
+        lp = torch.log_softmax(logits.float(), -1) + b[:, None] * torch.log(pi + eps)
+        return torch.where((b > 0)[:, None], torch.softmax(lp / temp, -1), pm), b
+    if rule == "lin24t":
+        p1 = (1 - w[:, None]) * torch.softmax(logits.float(), -1) + w[:, None] * pi
+        return torch.where((w > 0)[:, None], torch.softmax(torch.log(p1.clamp(min=1e-30)) / temp, -1), pm), w
+    return (1 - w[:, None]) * pm + w[:, None] * pi, w
+
+
+def poe_strength(rule, m, w, gt, beta):
+    """b = beta * min(m, 48) / 48 on gated rows with a match; poe_conf also * n / (n + kappa) (= w there)."""
+    b = torch.where(gt & (m > 0), beta * m.clamp(max=48).float() / 48, torch.zeros_like(w))
+    return b * w if rule == "poe_conf" else b
+
+
+def mix_t1(rule, lg, m, h, w, gt, beta, eps):
+    """held-out: the distribution before temperature (what mix() tempers), so the score covers what is sampled."""
+    pm = torch.softmax(lg, -1)
+    pi = h / h.sum(1, keepdim=True).clamp(min=1)
+    if rule.startswith("poe"):
+        b = poe_strength(rule, m, w, gt, beta)
+        return torch.where((b > 0)[:, None], torch.softmax(torch.log_softmax(lg, -1) + b[:, None] * torch.log(pi + eps), -1), pm)
+    return (1 - w[:, None]) * pm + w[:, None] * pi
+
+
 @torch.no_grad()
-def generate(lm, idx, rule, n, nbytes, temp, kappa, tau, rate, seed):
+def generate(lm, idx, rule, n, nbytes, temp, kappa, tau, rate, seed, beta=1.0, eps=0.01):
     torch.manual_seed(seed)
     rgen = torch.Generator(device="cuda")
     rgen.manual_seed(10_000 + seed)
@@ -70,17 +113,17 @@ def generate(lm, idx, rule, n, nbytes, temp, kappa, tau, rate, seed):
     g.hist = ids.clone()
     full = ids.clone()
     logits = g._forward(ids)
-    gates, ws = [], []
+    gates, ws, tvs = [], [], []
     for _ in range(nbytes):
         pm = torch.softmax(logits.float() / temp, -1)
         m, _, h = idx.next_bytes(full[:, -48:], lengths=LENGTHS, cap=512)
         gt = gate(rule, pm, tau, rate, rgen, m)
         w = weight(m, h, kappa, gt)
-        pi = h / h.sum(1, keepdim=True).clamp(min=1)
-        p = (1 - w[:, None]) * pm + w[:, None] * pi
+        p, wl = mix(rule, logits, pm, m, h, w, gt, temp, beta, eps)
         nxt = torch.multinomial(p, 1).squeeze(1)
         gates.append(gt.cpu())
-        ws.append(w.cpu())
+        ws.append(wl.cpu())
+        tvs.append((0.5 * (p - pm).abs().sum(1)).cpu())
         full = torch.cat([full, nxt[:, None]], 1)
         g.hist = torch.cat([g.hist, nxt[:, None]], 1)
         if g.pos >= g.ctx:
@@ -90,11 +133,12 @@ def generate(lm, idx, rule, n, nbytes, temp, kappa, tau, rate, seed):
             logits = g._forward(tail)
         else:
             logits = g._forward(nxt[:, None])
-    return full[:, len(PROMPT):].to(torch.uint8).cpu().numpy(), torch.stack(gates, 1), torch.stack(ws, 1)
+    return (full[:, len(PROMPT):].to(torch.uint8).cpu().numpy(), torch.stack(gates, 1), torch.stack(ws, 1),
+            torch.stack(tvs, 1))
 
 
 @torch.no_grad()
-def holdout_bpb(lm, idx, rule, kappa, tau, temp, rate, n_pos=4096):
+def holdout_bpb(lm, idx, rule, kappa, tau, temp, rate, n_pos=4096, beta=1.0, eps=0.01):
     """Code length of held-out bytes under the mixed predictor; the mixture uses p_model at T=1 (the model's own
     prediction), the gate reads the T=temp distribution exactly as in generation."""
     text = np.fromfile(f"{D}/clean_holdout.txt", dtype=np.uint8)
@@ -108,11 +152,10 @@ def holdout_bpb(lm, idx, rule, kappa, tau, temp, rate, n_pos=4096):
         ctx = torch.tensor(np.stack([text[p - L:p] for p in pos[s:s + 256]]), device="cuda").long()
         tgt = torch.tensor(text[pos[s:s + 256]].astype(np.int64), device="cuda")
         lg = lm.model(ctx)[:, -1].float()
-        pm = torch.softmax(lg, -1)
         m, _, h = idx.next_bytes(ctx[:, -48:], lengths=LENGTHS, cap=4096)
         gt = gate(rule, torch.softmax(lg / temp, -1), tau, rate, rgen, m)
         w = weight(m, h, kappa, gt)
-        p = (1 - w[:, None]) * pm + w[:, None] * h / h.sum(1, keepdim=True).clamp(min=1)
+        p = mix_t1(rule, lg, m, h, w, gt, beta, eps)
         bits.append(-torch.log2(p.gather(1, tgt[:, None]).clamp(min=1e-12)).squeeze(1).cpu())
         mlen.append(m.cpu())
         opened.append(gt.cpu())
@@ -124,7 +167,7 @@ def holdout_bpb(lm, idx, rule, kappa, tau, temp, rate, n_pos=4096):
         sel = (mlen >= lo) & (mlen <= hi)
         out[f"m{lo}_{hi}"] = {"frac": round(float(sel.float().mean()), 4),
                               "bpb": round(float(bits[sel].mean()), 4) if sel.any() else None}
-    return out, bits
+    return out, bits, mlen
 
 
 @torch.no_grad()
@@ -144,7 +187,7 @@ def copy_frac(idx, srcs, win=48):
     return round(hit / len(ctxs), 4), round(rare / len(ctxs), 4)
 
 
-def score_rows(rows, gates, ws, corpus):
+def score_rows(rows, gates, ws, tvs, corpus):
     res = []
     for r, row in enumerate(rows):
         raw = bytes(row)
@@ -157,7 +200,8 @@ def score_rows(rows, gates, ws, corpus):
         k = max(0, min(len(row), len(src.encode()) - 4))    # generated bytes inside the function
         res.append({"src": src, "terminated": term, "novel": src.encode() not in corpus, "bad_utf8": bad,
                     "fn_bytes": k, "gate_fn": int(gates[r, :k].sum()), "used_fn": int((ws[r, :k] > 0).sum()),
-                    "w_sum_fn": round(float(ws[r, :k].sum()), 3), **judge(src)})
+                    "w_sum_fn": round(float(ws[r, :k].sum()), 3), "tv_fn": round(float(tvs[r, :k].sum()), 4),
+                    **judge(src)})
     return res
 
 
@@ -172,7 +216,36 @@ def summarize(res):
     s["used_fn"] = round(sum(r["used_fn"] for r in res) / max(nb, 1), 4)
     nu = sum(r["used_fn"] for r in res)
     s["w_mean_used"] = round(sum(r["w_sum_fn"] for r in res) / nu, 4) if nu else None
+    s["tv_per_fn"] = mean(lambda r: r["tv_fn"])           # expected flips (lower bound) per function
     return s
+
+
+def tpn(r):
+    return float(r["terminated"] and r["parses"] and r["novel"])
+
+
+def paired_vs_model(report, rules, seeds, n_boot=10_000):
+    """Opus mix4 review D3: paired (seed, row) difference of term_parses_novel vs the model rule, bootstrap 95% CI
+    over the pairs; copy48 is reported beside it, not used in the verdict."""
+    base = report["model"]["rows"]
+    rng = np.random.default_rng(0)
+    out = {}
+    for rule in rules:
+        if rule == "model":
+            continue
+        rows = report[rule]["rows"]
+        d = np.array([tpn(a) - tpn(b) for sd in seeds for a, b in zip(rows[sd], base[sd])])
+        bs = d[rng.integers(0, len(d), (n_boot, len(d)))].mean(1)
+        tv = float(np.mean([a["tv_fn"] for sd in seeds for a in rows[sd]]))
+        out[rule] = {"n_pairs": len(d), "d_tpn": round(float(d.mean()), 4),
+                     "ci95": [round(float(np.percentile(bs, 2.5)), 4), round(float(np.percentile(bs, 97.5)), 4)],
+                     # review D6-multiplicity: 3 poe arms judged at once -> Bonferroni 1 - .05/3 two-sided
+                     "ci983_bonf3": [round(float(np.percentile(bs, 100 * .05 / 6)), 4),
+                                     round(float(np.percentile(bs, 100 - 100 * .05 / 6)), 4)],
+                     "rows_identical_src": int(sum(a["src"] == b["src"] for sd in seeds for a, b in zip(rows[sd], base[sd]))),
+                     "tv_per_fn": round(tv, 3), "d_tpn_per_flip": round(float(d.mean()) / tv, 4) if tv > 0 else None,
+                     "d_copy48": round(report[rule]["mean"]["copy48"] - report["model"]["mean"]["copy48"], 4)}
+    return out
 
 
 def main():
@@ -189,7 +262,12 @@ def main():
     ap.add_argument("--rand-rate", type=float, default=None,
                     help="random gate rate; default = the stress arm's measured in-function gate rate")
     ap.add_argument("--control", default=None, help="eval_clean.json: model rule, seed 0 must reproduce its free rows")
+    ap.add_argument("--control-rules", default="model", help="rules checked against --control (e.g. model,poe_always "
+                    "with --beta 0: the poe path with zero strength must reproduce the model rows)")
     ap.add_argument("--mem-frac", type=float, default=0.3)
+    ap.add_argument("--beta", type=float, default=1.0, help="poe_*: corpus exponent at a 48-byte match")
+    ap.add_argument("--eps", type=float, default=0.01, help="poe_*: floor added to p_index (a byte the corpus never "
+                    "saw after this context is down-weighted by eps^b, not removed)")
     args = ap.parse_args()
     rules = args.rules.split(",")
     for r in rules:
@@ -216,8 +294,9 @@ def main():
         per_seed, rows_all = {}, {}
         for seed in seeds:
             rr = args.rand_rate if args.rand_rate is not None else rate["gen"].get(seed, 0.0)
-            rows, gates, ws = generate(lm, idx, rule, args.n, args.bytes, args.temp, args.kappa, args.tau, rr, seed)
-            res = score_rows(rows, gates, ws, corpus)
+            rows, gates, ws, tvs = generate(lm, idx, rule, args.n, args.bytes, args.temp, args.kappa, args.tau, rr,
+                                            seed, args.beta, args.eps)
+            res = score_rows(rows, gates, ws, tvs, corpus)
             s = summarize(res)
             s["copy48"], s["copy48_rare"] = copy_frac(idx, [r["src"] for r in res])
             if rule == "stress":
@@ -227,18 +306,25 @@ def main():
             per_seed[seed], rows_all[seed] = s, res
             print(f"{rule:7s} seed {seed} {json.dumps(s)}", flush=True)
         hr = rate["hold"] if rate["hold"] is not None else 0.0
-        hold_s, bits[rule] = holdout_bpb(lm, idx, rule, args.kappa, args.tau, args.temp, hr)
+        hold_s, bits[rule], mlen = holdout_bpb(lm, idx, rule, args.kappa, args.tau, args.temp, hr, beta=args.beta,
+                                               eps=args.eps)
+        if rule == "lin24t":
+            hold_s["note"] = "lin24t held-out == stress24 by construction (mix_t1 is the T=1 mixture); not a result"
         for other in bits:            # paired difference per held-out byte (same positions in every arm)
             if other != rule:
                 dd = bits[rule] - bits[other]
                 hold_s[f"d_vs_{other}"] = [round(float(dd.mean()), 4), round(float(dd.std() / len(dd) ** 0.5), 4)]
+                for nm, sel in (("m_lt48", mlen < 48), ("m48", mlen >= 48)):     # review D4: split by match length
+                    x = dd[sel]
+                    hold_s[f"d_vs_{other}_{nm}"] = [round(float(x.mean()), 4), round(float(x.std() / len(x) ** 0.5), 4),
+                                                    int(len(x))] if len(x) > 1 else None
         if rule == "stress" and args.rand_rate is None:
             rate["hold"] = hold_s["gate_rate"]
         mean = {k: round(float(np.mean([per_seed[sd][k] for sd in seeds])), 4)
                 for k in per_seed[seeds[0]] if isinstance(per_seed[seeds[0]][k], (int, float))}
         entry = {"mean": mean, "per_seed": per_seed, "holdout": hold_s, "rows": rows_all,
                  "wall_s": round(time.perf_counter() - t0, 1)}
-        if args.control and rule == "model" and 0 in seeds:
+        if args.control and rule in args.control_rules.split(",") and 0 in seeds:
             ctl = json.load(open(args.control))["rows"]["free"]
             mine = rows_all[0]
             same = sum(a["src"] == b["src"] for a, b in zip(ctl, mine))
@@ -248,6 +334,11 @@ def main():
             print("control", json.dumps(entry["control"]), flush=True)
         report[rule] = entry
         print(f"{rule:7s} mean {json.dumps(mean)} holdout {json.dumps(hold_s)} wall {entry['wall_s']}", flush=True)
+        with open(args.out, "w") as fh:
+            json.dump(report, fh)
+    if "model" in rules and len(rules) > 1:
+        report["paired_vs_model"] = paired_vs_model(report, rules, seeds)
+        print("paired_vs_model", json.dumps(report["paired_vs_model"]), flush=True)
         with open(args.out, "w") as fh:
             json.dump(report, fh)
 

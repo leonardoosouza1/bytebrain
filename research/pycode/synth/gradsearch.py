@@ -1,21 +1,43 @@
-"""Program search by derivative (ledger #24, registered 2026-10-23, CPU).
+"""Program search by derivative (ledger #24 + #26, CPU). v2 after the 2026-10-26 review (GUESS-AND-DERIVE.md sec 4, 6).
 
-Input is the PROBLEM, not the name: 8 input/output examples of a hidden synth2 task (units + final).
+Input is the PROBLEM, not the name: n_ex input/output examples of a hidden synth2 task (units + final).
 Each program slot is a softmax over all units (+ identity). A differentiable executor runs every unit on a soft
 list state (values v [N, L], keep mask m [N, L]); the next state is the probability-weighted mix of all unit
 outputs. Loss vs the target outputs; Adam moves the slot logits. Argmax -> discrete program -> exact check on the
-8 examples (restart if wrong) -> strict bwrap grade on the 40 hidden synth2 INPUTS.
-Control: random search over discrete programs with the same budget of unit applications.
-The final (sum/len/max/...) is given, as the task head is given to the planner.
-Prediction: len2 >= 80% both arms (space 47^2 is small); len4 gradient >> random (47^4 = 4.9M programs).
+examples (restart if wrong) -> bwrap grade on the 40 hidden synth2 INPUTS. The final (sum/len/max/...) is given.
 
-Usage: gradsearch.py --out DIR [--n 40 --lens 2,3,4 --steps 300 --restarts 8]
+Arms (all see the same problem; random gets the derive_only unit-application budget):
+  derive_only   random init (+ Gumbel), Adam steps                          (the old "grad" arm)
+  rand          random discrete programs, same budget as derive_only; also run to the full budget to count fits
+  guess_only    argmax of the guess, 0 steps                                 (only if --guess-source != none)
+  guess_derive  Adam steps starting from the guess logits                    (only if --guess-source != none)
+Guess sources: none (random init), oracle_noisy (true program one-hot + noise: a stand-in for the planner,
+NOT a learned guess), planner (TODO, not implemented).
+
+Derive improvements, each behind a flag, default ON (--legacy or the --no-* flags reproduce the old numbers):
+  anneal sharpness T 2 -> 30 (--no-anneal: fixed 20) | loss / (1 + mean target^2) (--no-norm)
+  Gumbel noise on the init logits per restart (--no-gumbel) | reverse compacts kept items to the front (--no-compact-reverse)
+  --stop-dloss eps: stop a restart when |loss_t - loss_{t-25}| < eps (idea #26); default 0 = off. Trace always recorded.
+
+Metrics per length and arm: <arm>_fit8 (fits the examples), <arm>_hidden40_io (MAIN: output equals the true program on the
+40 hidden inputs, strict=False), <arm>_hidden40_strict (secondary: list state before the final must also match),
+<arm>_fit8_not_io(_given_fit) (fits the examples but is wrong on hidden io). Ambiguity per problem: number of distinct
+programs fitting the examples (exact enumeration for len <= --exact-max, else distinct fits found by random search run to
+its full budget, capped), and how many of them are io-equivalent on the 40 hidden inputs.
+Results JSON is rewritten after every problem (partial) and every length.
+
+PREDICTION: fill before run
+
+Usage: gradsearch.py --out DIR [--n 40 --lens 2,3,4 --steps 300 --restarts 8 --n-ex 8 --guess-source oracle_noisy --guess-noise 1.0]
 """
 
 import argparse
+import functools
+import itertools
 import json
 import os
 import random
+import statistics
 import sys
 import time
 
@@ -23,32 +45,42 @@ import torch
 
 sys.path.insert(0, os.path.dirname(__file__))
 import synth2  # noqa: E402
-from synth2 import FINAL, INPUTS, UNITS, grade, nargs, source  # noqa: E402
+from synth2 import FINAL, INPUTS, UNITS, grade, nargs  # noqa: E402
 
 U = list(UNITS)                       # 46 units; slot choice index len(U) = identity
-L, BIG, T = 12, 1e4, 20.0             # padded list length, masked sentinel, sharpness of soft comparisons
+L, BIG, T_LEGACY = 12, 1e4, 20.0      # padded list length, masked sentinel, old fixed sharpness of soft comparisons
+
+
+@functools.lru_cache(maxsize=200_000)
+def _fn(units, final):
+    """compiled composition of OUR unit code under a neutral name (a function named `abs` would shadow the builtin).
+    k defaults to 0 like the hidden grade's found-program wrapper."""
+    g = {}
+    exec("def _f(xs, k=0):\n" + "".join(f"    {l}\n" for u in units for l in UNITS[u]) + f"    {FINAL[final]}\n", g)
+    return g["_f"]
 
 
 def py_run(units, final, xs, k):
     """trusted in-process run of a composition of OUR unit code (search scoring only; the grade uses bwrap)."""
-    g = {}
-    exec(source(units, final), g)
-    f = g[synth2.name_of(units, final)]
+    f = _fn(tuple(units), final)
     try:
         return f(list(xs), k) if nargs(units) == 2 else f(list(xs))
     except Exception:
         return "!"
 
 
-def soft_unit(u, v, m, k):
+def soft_unit(u, v, m, k, T, crev=True):
     sg = torch.sigmoid
     if u in ("sort",):
         key = torch.where(m > 0.5, v, torch.full_like(v, BIG))
         idx = torch.sort(key, dim=1, stable=True).indices
         return v.gather(1, idx), m.gather(1, idx)
     if u == "reverse":
-        # reverse kept order: kept elements move to the front reversed; holes do not matter for later ops
-        return v.flip(1), m.flip(1)
+        if not crev:                                   # legacy: kept items end up at the END of the padded row
+            return v.flip(1), m.flip(1)
+        pos = torch.arange(L).float()[None].expand_as(v)   # kept items reversed AND compacted to the front (like sort)
+        idx = torch.sort(torch.where(m > 0.5, -pos, torch.full_like(v, BIG)), dim=1, stable=True).indices
+        return v.gather(1, idx), m.gather(1, idx)
     if u == "negate":
         return -v, m
     if u == "abs":
@@ -88,24 +120,24 @@ def soft_unit(u, v, m, k):
     raise KeyError(u)
 
 
-def soft_final(final, v, m):
+def soft_final(final, v, m, T):
     if final == "sum":
         return (v * m).sum(1)
     if final == "len":
         return m.sum(1)
-    if final == "max":
-        w = torch.softmax(torch.where(m > 0.5, v, torch.full_like(v, -BIG)) * 4, 1)
+    if final == "max":                                                      # sharpness T/5 (= 4 at the legacy T=20)
+        w = torch.softmax(torch.where(m > 0.5, v, torch.full_like(v, -BIG)) * (T / 5), 1)
         return (w * v).sum(1) * (m.sum(1) > 0.5)
     if final == "first":
         w = m * torch.cumprod(torch.cat([torch.ones_like(m[:, :1]), 1 - m[:, :-1]], 1), 1)
         return (w * v).sum(1)
     if final.startswith("count_gt_"):
-        return (m * torch.sigmoid(T * (v - int(final[-1]) - 0.5))).sum(1)
+        return (m * torch.sigmoid(T * (v - int(final.rsplit("_", 1)[1]) - 0.5))).sum(1)
     raise KeyError(final)
 
 
-def list_loss(v, m, targets):
-    """kept element of rank r must equal target[r]; length must match."""
+def list_loss(v, m, targets, scale=1.0):
+    """kept element of rank r must equal target[r]; length must match. The value term is divided by `scale`."""
     r = torch.cumsum(m, 1) - 1
     loss = 0
     for i, t in enumerate(targets):
@@ -114,7 +146,7 @@ def list_loss(v, m, targets):
         lo = ri.floor().long()
         frac = ri - lo
         tv = tt[lo] * (1 - frac) + tt[(lo + 1).clamp(max=L - 1)] * frac
-        loss = loss + (m[i] * (v[i] - tv) ** 2).sum() / (1 + len(t)) + (m[i].sum() - len(t)) ** 2
+        loss = loss + (m[i] * (v[i] - tv) ** 2).sum() / (1 + len(t)) / scale + (m[i].sum() - len(t)) ** 2
     return loss / len(targets)
 
 
@@ -127,18 +159,37 @@ class Problem:
         self.v = torch.tensor([xs + [0] * (L - len(xs)) for xs, _ in self.ex], dtype=torch.float32)
         self.m = torch.tensor([[1.0] * len(xs) + [0.0] * (L - len(xs)) for xs, _ in self.ex])
         self.k = torch.tensor([float(k) for _, k in self.ex])[:, None]
+        self.tgt = None if final == "" else torch.tensor([float(o) if o != "!" else 0.0 for o in self.out])
+        vals = [float(x) for o in self.out if o != "!" for x in (o if final == "" else [o])]
+        self.scale = 1.0 + (sum(x * x for x in vals) / len(vals) if vals else 0.0)   # 1 + mean(target^2)
+        self.hid = None                                                    # truth outputs on the 40 hidden inputs
 
     def check(self, units):
         return all(py_run(units, self.final, xs, k) == o for (xs, k), o in zip(self.ex, self.out))
 
+    def io_equiv(self, units):
+        """output equals the true program on the 40 hidden inputs, called like the hidden grade (truth's arity, k=0 default)."""
+        two = nargs(self.units) == 2
 
-def soft_loss(p, logits):
+        def run(us, xs, k):
+            try:
+                f = _fn(tuple(us), self.final)
+                return f(list(xs), k) if two else f(list(xs))
+            except Exception:
+                return "!"
+        if self.hid is None:
+            self.hid = [run(self.units, xs, k) for xs, k in INPUTS]
+        return all(run(units, xs, k) == h for (xs, k), h in zip(INPUTS, self.hid))
+
+
+def soft_loss(p, logits, T=T_LEGACY, norm=False, crev=False):
+    """defaults = the legacy executor; main() passes the annealed T / norm / crev."""
     v, m = p.v, p.m
     for lg in logits:
         w = torch.softmax(lg, 0)
         vs, ms = [v], [m]                                   # index len(U) = identity
         for u in U:
-            a, b = soft_unit(u, v, m, p.k)
+            a, b = soft_unit(u, v, m, p.k, T, crev)
             vs.append(a)
             ms.append(b)
         order = [len(U)] + list(range(len(U)))              # stacked [identity, U...] -> weights reordered
@@ -146,43 +197,126 @@ def soft_loss(p, logits):
         v = (w[:, None, None] * torch.stack(vs)).sum(0)
         m = (w[:, None, None] * torch.stack(ms)).sum(0)
         v = v.clamp(-BIG, BIG)
+    sc = p.scale if norm else 1.0
     if p.final == "":
-        return list_loss(v, m, p.out)
-    tgt = torch.tensor([float(o) if o != "!" else 0.0 for o in p.out])
-    return ((soft_final(p.final, v, m) - tgt) ** 2).mean()
+        return list_loss(v, m, p.out, sc)
+    return ((soft_final(p.final, v, m, T) - p.tgt) ** 2).mean() / sc
 
 
 def decode(logits):
     return [U[i] for i in (int(lg.argmax()) for lg in logits) if i < len(U)]
 
 
-def grad_search(p, n_slots, steps, restarts, seed):
-    g = torch.Generator().manual_seed(seed)
-    apps = 0
-    for r in range(restarts):
-        logits = [(torch.randn(len(U) + 1, generator=g) * 0.5).requires_grad_() for _ in range(n_slots)]
+def temp_at(a, s):
+    """sharpness at step s: geometric t0 -> t1 over the steps (legacy: fixed 20)."""
+    return a.t0 * (a.t1 / a.t0) ** (s / max(1, a.steps - 1)) if a.anneal else T_LEGACY
+
+
+def guess_logits(p, n_slots, source, g, noise=0.0, gumbel=0.0, strength=4.0):
+    """-> n_slots leaf logit tensors [len(U)+1] (last = identity). Pluggable source:
+    none          random init N(0, 0.5) (+ Gumbel * `gumbel`): the derive_only start
+    oracle_noisy  true program one-hot (`strength`) + N(0, noise) per logit. ORACLE stand-in for the planner, NOT a learned guess.
+    planner       TODO: blockaddr planner reading the NAME (never the examples); needs a per-slot distribution
+                  [n_slots, len(U)+1] over U from the name, e.g. softmax of its unit-token logits, plugged in here."""
+    out = []
+    for j in range(n_slots):
+        if source == "none":
+            lg = torch.randn(len(U) + 1, generator=g) * 0.5
+            if gumbel > 0:
+                u = torch.rand(len(U) + 1, generator=g).clamp(1e-9, 1 - 1e-9)
+                lg = lg + gumbel * (-torch.log(-torch.log(u)))
+        elif source == "oracle_noisy":
+            lg = torch.randn(len(U) + 1, generator=g) * noise
+            lg[U.index(p.units[j])] += strength
+        elif source == "planner":
+            raise NotImplementedError("TODO planner: blockaddr planner reading the name -> [n_slots, len(U)+1] logits")
+        else:
+            raise ValueError(source)
+        out.append(lg.requires_grad_())
+    return out
+
+
+def derive(p, n_slots, a, init):
+    """Adam on slot logits. init(r) -> logits of restart r. Returns the program, unit applications, restart index,
+    steps run per restart, and the loss / |loss_t - loss_{t-25}| trace of the last restart."""
+    apps, stops = 0, []
+    for r in range(a.restarts):
+        logits = init(r)
         opt = torch.optim.Adam(logits, lr=0.3)
-        for s in range(steps):
-            loss = soft_loss(p, logits)
+        hist, dl = [], []
+        for s in range(a.steps):
+            loss = soft_loss(p, logits, temp_at(a, s), a.norm, a.crev)
             opt.zero_grad()
             loss.backward()
             opt.step()
             apps += n_slots * len(U)
+            hist.append(loss.item())
+            if s >= 25:
+                dl.append(abs(hist[s] - hist[s - 25]))
             if s % 25 == 24 and p.check(decode(logits)):
-                return decode(logits), apps, r
+                stops.append(s + 1)
+                return decode(logits), apps, r, stops, hist, dl
+            if a.stop_dloss > 0 and s >= 25 and dl[-1] < a.stop_dloss:
+                break
+        stops.append(s + 1)
         if p.check(decode(logits)):
-            return decode(logits), apps, r
-    return decode(logits), apps, restarts
+            return decode(logits), apps, r, stops, hist, dl
+    return decode(logits), apps, a.restarts, stops, hist, dl
 
 
-def random_search(p, n_slots, budget, seed):
-    r, apps = random.Random(seed), 0
-    while apps < budget:
+def random_search(p, n_slots, budget, seed, cap=50):
+    """-> (first fit or last tried, apps at first fit or total, distinct fits found). Runs to the full budget or `cap` fits."""
+    r, apps, first, apps_first, fits, units = random.Random(seed), 0, None, 0, set(), []
+    while apps < budget and len(fits) < cap:
         units = [r.choice(U) for _ in range(r.randint(1, n_slots))]
         apps += len(units)
         if p.check(units):
-            return units, apps
-    return units, apps
+            if first is None:
+                first, apps_first = units, apps
+            fits.add(tuple(units))
+    return (first, apps_first, fits) if first is not None else (units, apps, fits)
+
+
+def enumerate_fits(p, n_slots):
+    return [list(us) for n in range(1, n_slots + 1) for us in itertools.product(U, repeat=n) if p.check(list(us))]
+
+
+def hidden(found, truth, strict):
+    """found/truth [(units, final)] -> [bool] output (and, if strict, list state) equals the truth on all 40 hidden inputs."""
+    # found body under the true name; `k=0` default so a found program of other arity still runs
+    srcs = [[f"def {synth2.name_of(*t)}(xs, k=0):\n" + "".join(f"    {l}\n" for u in fu for l in UNITS[u])
+             + f"    {FINAL[ff]}\n"] for (fu, ff), t in zip(found, truth)]
+    return [s[0] == 1.0 for s in grade(truth, srcs, strict)]
+
+
+def dump(res, path):
+    with open(path + ".tmp", "w") as f:
+        json.dump(res, f, indent=1)
+    os.replace(path + ".tmp", path)
+
+
+def smoke(a):
+    """one-hot slots must reproduce the python run: legacy executor and the annealed path at final T (known number: 0)."""
+    r = random.Random(3)
+    fixed = [(["keep_gt_2", "reverse", "take_3"], f) for f in ("", "first", "sum")] + \
+            [(["reverse", "drop_first"], "first"), (["unique", "reverse", "dedup_adjacent"], "len"),
+             (["sort", "reverse", "running_max"], "max"), (["abs"], ""), (["add_k", "keep_gt_k", "take_k"], "sum")]
+    cases = [(fixed_u, f) for fixed_u, f in fixed]
+    for _ in range(200):
+        cases.append(([r.choice(U) for _ in range(r.randint(1, 4))], r.choice(["sum", "len", "first", "max", "count_gt_3", ""])))
+    modes = {"legacy": (T_LEGACY, False, False), "final_T": (a.t1, True, True)}
+    bad = {k: [] for k in modes}
+    for units, fin in cases:
+        p = Problem(units, fin, 8, r.randint(0, 99))
+        if any(o == "!" for o in p.out):
+            continue
+        hard = [torch.full((len(U) + 1,), -1e4).index_fill_(0, torch.tensor([U.index(u)]), 1e4) for u in units]
+        for k, (T, norm, crev) in modes.items():
+            loss = soft_loss(p, hard, T, norm, crev).item()
+            if loss > (5e-2 if fin == "max" else 1e-3):             # soft max is only ~exact (softmax over values)
+                bad[k].append([units, fin, round(loss, 4)])
+    print(json.dumps({"smoke_onehot_cases": len(cases), **{f"smoke_mismatch_{k}": len(v) for k, v in bad.items()},
+                      "smoke_examples": {k: v[:3] for k, v in bad.items()}}), flush=True)
 
 
 def main():
@@ -195,24 +329,32 @@ def main():
     ap.add_argument("--n-ex", type=int, default=8)
     ap.add_argument("--threads", type=int, default=2)
     ap.add_argument("--smoke", action="store_true")
+    ap.add_argument("--legacy", action="store_true", help="all four derive improvements off")
+    ap.add_argument("--no-anneal", dest="anneal", action="store_false")
+    ap.add_argument("--no-norm", dest="norm", action="store_false")
+    ap.add_argument("--no-gumbel", dest="gumbel_on", action="store_false")
+    ap.add_argument("--no-compact-reverse", dest="crev", action="store_false")
+    ap.add_argument("--t0", type=float, default=2.0)
+    ap.add_argument("--t1", type=float, default=30.0)
+    ap.add_argument("--gumbel-scale", type=float, default=0.5)
+    ap.add_argument("--stop-dloss", type=float, default=0.0, help="stop a restart when |loss_t - loss_{t-25}| < eps; 0 = off")
+    ap.add_argument("--guess-source", default="none", choices=["none", "oracle_noisy", "planner"])
+    ap.add_argument("--guess-noise", type=float, default=1.0)
+    ap.add_argument("--guess-logit", type=float, default=4.0, help="one-hot strength of the oracle guess")
+    ap.add_argument("--exact-max", type=int, default=2, help="enumerate all fitting programs exactly up to this length")
+    ap.add_argument("--fit-cap", type=int, default=50)
     a = ap.parse_args()
+    if a.legacy:
+        a.anneal = a.norm = a.gumbel_on = a.crev = False
+    a.gumbel = a.gumbel_scale if a.gumbel_on else 0.0
     torch.set_num_threads(a.threads)
     os.makedirs(a.out, exist_ok=True)
-    # smoke 1: soft executor with one-hot slots must equal the python run on every example (known number: 0 loss)
-    r = random.Random(3)
-    bad = 0
-    for _ in range(200):
-        units = [r.choice(U) for _ in range(r.randint(1, 4))]
-        fin = r.choice(["sum", "len", "first", "count_gt_3", ""])
-        p = Problem(units, fin, 8, r.randint(0, 99))
-        if any(o == "!" for o in p.out):
-            continue
-        hard = [torch.full((len(U) + 1,), -1e4).index_fill_(0, torch.tensor([U.index(u)]), 1e4) for u in units]
-        bad += soft_loss(p, hard).item() > 1e-3
-    print(json.dumps({"smoke_onehot_mismatch_of_200": int(bad)}), flush=True)
+    smoke(a)
     if a.smoke:
         return
-    res = {"n_ex": a.n_ex, "steps": a.steps, "restarts": a.restarts, "eval": {}}
+    path = f"{a.out}/gradsearch.json"
+    res = {"config": vars(a), "guess_is_oracle": a.guess_source == "oracle_noisy", "eval": {}}
+    arms = ["derive_only", "rand"] + (["guess_only", "guess_derive"] if a.guess_source != "none" else [])
     g = random.Random(17)
     for n_slots in map(int, a.lens.split(",")):
         rows = []
@@ -223,35 +365,63 @@ def main():
                 p = Problem(units, fin, a.n_ex, g.randint(0, 10**6))
                 if "!" not in p.out:
                     break
+            row = {"true": units, "final": fin, "arms": {}}
+            gen = torch.Generator().manual_seed(i)             # one stream across restarts (legacy order)
             t0 = time.perf_counter()
-            gu, gapps, gr = grad_search(p, n_slots, a.steps, a.restarts, i)
-            g_s = time.perf_counter() - t0
+            gu, gapps, gr, stops, hist, dl = derive(p, n_slots, a, lambda r: guess_logits(p, n_slots, "none", gen, gumbel=a.gumbel))
+            row["arms"]["derive_only"] = {"units": gu, "apps": gapps, "restarts": gr, "steps_per_restart": stops,
+                                          "s": round(time.perf_counter() - t0, 2), "fit": p.check(gu),
+                                          "loss_trace": [round(x, 5) for x in hist], "dloss25_trace": [round(x, 5) for x in dl]}
             t0 = time.perf_counter()
-            ru, rapps = random_search(p, n_slots, gapps, i)
-            r_s = time.perf_counter() - t0
-            rows.append({"true": units, "final": fin, "grad": gu, "grad_apps": gapps, "grad_restarts": gr,
-                         "grad_s": round(g_s, 2), "rand": ru, "rand_apps": rapps, "rand_s": round(r_s, 2),
-                         "grad_fit": p.check(gu), "rand_fit": p.check(ru)})
-        tasks_g = [(r_["grad"], r_["final"]) for r_ in rows]
-        tasks_r = [(r_["rand"], r_["final"]) for r_ in rows]
+            ru, rapps, fits = random_search(p, n_slots, gapps, i, a.fit_cap)
+            row["arms"]["rand"] = {"units": ru, "apps": rapps, "s": round(time.perf_counter() - t0, 2), "fit": p.check(ru)}
+            amb = {"n_fit_rand": len(fits), "n_fit_io_rand": sum(p.io_equiv(list(f)) for f in fits),
+                   "rand_cap_hit": len(fits) >= a.fit_cap}
+            if n_slots <= a.exact_max:
+                ex = enumerate_fits(p, n_slots)
+                amb.update({"n_fit_exact": len(ex), "n_fit_io_exact": sum(p.io_equiv(f) for f in ex)})
+            row["ambiguity"] = amb
+            if a.guess_source != "none":
+                kw = dict(noise=a.guess_noise, strength=a.guess_logit)
+                gl = guess_logits(p, n_slots, a.guess_source, torch.Generator().manual_seed(i), **kw)
+                row["arms"]["guess_only"] = {"units": decode(gl), "apps": 0, "fit": p.check(decode(gl))}
+                g1 = torch.Generator().manual_seed(i)
+                t0 = time.perf_counter()
+                du, dapps, dr, dstops, dh, ddl = derive(p, n_slots, a, lambda r: guess_logits(p, n_slots, a.guess_source, g1, **kw))
+                row["arms"]["guess_derive"] = {"units": du, "apps": dapps, "restarts": dr, "steps_per_restart": dstops,
+                                               "s": round(time.perf_counter() - t0, 2), "fit": p.check(du),
+                                               "loss_trace": [round(x, 5) for x in dh], "dloss25_trace": [round(x, 5) for x in ddl]}
+            rows.append(row)
+            res["partial"] = {"len": n_slots, "rows": rows}
+            dump(res, path)
         truth = [(r_["true"], r_["final"]) for r_ in rows]
-        # strict bwrap grade: found program vs the true one on the 40 hidden inputs (output + list state)
-        def hidden(found):
-            # found body under the true name; `k=0` default so a found program of other arity still runs
-            srcs = [[f"def {synth2.name_of(*t)}(xs, k=0):\n" + "".join(f"    {l}\n" for u in fu for l in UNITS[u])
-                     + f"    {FINAL[ff]}\n"] for (fu, ff), t in zip(found, truth)]
-            sc = grade(truth, srcs)
-            return sum(s[0] == 1.0 for s in sc) / len(found)
-        res["eval"][f"len{n_slots}"] = {
-            "n": a.n, "grad_fit8": sum(r_["grad_fit"] for r_ in rows) / a.n,
-            "rand_fit8": sum(r_["rand_fit"] for r_ in rows) / a.n,
-            "grad_hidden40": hidden(tasks_g), "rand_hidden40": hidden(tasks_r),
-            "mean_apps": sum(r_["grad_apps"] for r_ in rows) / a.n,
-            "grad_s": round(sum(r_["grad_s"] for r_ in rows), 1), "rand_s": round(sum(r_["rand_s"] for r_ in rows), 1),
-            "rows": rows}
-        print(json.dumps({f"len{n_slots}": {k: v for k, v in res["eval"][f"len{n_slots}"].items() if k != "rows"}}),
-              flush=True)
-    json.dump(res, open(f"{a.out}/gradsearch.json", "w"), indent=1)
+        out = {"n": a.n, "n_ex": a.n_ex}
+        for arm in arms:
+            found = [(r_["arms"][arm]["units"], r_["final"]) for r_ in rows]
+            io, st = hidden(found, truth, False), hidden(found, truth, True)
+            fit = [r_["arms"][arm]["fit"] for r_ in rows]
+            for r_, x, y in zip(rows, io, st):
+                r_["arms"][arm].update({"hidden_io": x, "hidden_strict": y})
+            nf = sum(fit)
+            fni = sum(f and not x for f, x in zip(fit, io))
+            out.update({f"{arm}_fit8": nf / a.n, f"{arm}_hidden40_io": sum(io) / a.n, f"{arm}_hidden40_strict": sum(st) / a.n,
+                        f"{arm}_fit8_not_io": fni / a.n, f"{arm}_fit8_not_io_given_fit": fni / max(1, nf),
+                        f"{arm}_mean_apps": sum(r_["arms"][arm]["apps"] for r_ in rows) / a.n,
+                        f"{arm}_s": round(sum(r_["arms"][arm].get("s", 0) for r_ in rows), 1)})
+        ex_key = "n_fit_exact" if n_slots <= a.exact_max else "n_fit_rand"
+        nfit = [r_["ambiguity"][ex_key] for r_ in rows]
+        nio = [r_["ambiguity"][ex_key.replace("fit", "fit_io", 1)] for r_ in rows]
+        out.update({"ambiguity_source": "exact" if ex_key == "n_fit_exact" else f"random_search_capped_{a.fit_cap}",
+                    "amb_n_fit_mean": round(sum(nfit) / a.n, 2), "amb_n_fit_median": statistics.median(nfit),
+                    "amb_unique_frac": sum(x == 1 for x in nfit) / a.n, "amb_n_fit_io_mean": round(sum(nio) / a.n, 2),
+                    "amb_rand_cap_hit_frac": sum(r_["ambiguity"]["rand_cap_hit"] for r_ in rows) / a.n,
+                    "derive_mean_steps_per_restart": round(sum(sum(r_["arms"]["derive_only"]["steps_per_restart"]) /
+                                                              len(r_["arms"]["derive_only"]["steps_per_restart"]) for r_ in rows) / a.n, 1),
+                    "rows": rows})
+        res["eval"][f"len{n_slots}"] = out
+        res.pop("partial", None)
+        dump(res, path)
+        print(json.dumps({f"len{n_slots}": {k: v for k, v in out.items() if k != "rows"}}), flush=True)
 
 
 if __name__ == "__main__":

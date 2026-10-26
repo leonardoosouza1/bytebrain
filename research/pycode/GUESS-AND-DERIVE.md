@@ -74,3 +74,13 @@ Reading:
 3. More examples / prefer the simplest fitting program (fixes ambiguity).
 4. Move the inner loop to GPU in batch (thousands of problems per kernel), measure µs per derive step.
 5. Plug more experts: calc ops (continuous, derive natively), compose tree slots, verified programs as experts.
+
+## 6. Review 2026-10-26 (gaps found, nothing rerun)
+
+- gradsearch len4 lost: the process died with the session and results are written only at the end. Fix: dump per length.
+- gradsearch hidden grade is STRICT (list state before the final must match the true program). The problem only
+  gives I/O, so an output-equivalent program with another intermediate state is counted wrong. Must use
+  strict=False for this test (it biases both arms down, more for finals len/sum/count_gt).
+- Ambiguity is unmeasured: we do not know how many distinct programs fit the 8 examples; need that count per problem.
+- Qwen comparison: 100 sampled tasks per split vs our full splits; no failure taxonomy; raw completion without chat
+  template (may understate an instruct model); 3B arm not run.

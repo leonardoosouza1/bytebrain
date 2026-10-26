@@ -96,6 +96,14 @@ Adaptation: derivative on what is continuous (constants, thresholds, the calc op
 3. More examples / prefer the simplest fitting program (fixes ambiguity).
 4. Move the inner loop to GPU in batch (thousands of problems per kernel), measure µs per derive step.
 5. Plug more experts: calc ops (continuous, derive natively), compose tree slots, verified programs as experts.
+   Plan after v2 (10-26, #25 + #26 adaptation, not built yet): a soft straight-line program in the A1 steps
+   language, `s_k = op_k(x, y)`: per step a softmax over the calc ops (multifn.DEFS) and, per argument, a softmax over
+   {a, b, s_1..s_k-1, c_k}, where c_k is a real constant. Discrete parts (op, wiring) are searched by sampling
+   near the guess (what won in v2); the constants are fitted by the derivative until |dloss| ~ 0 (his stop rule),
+   which is where the gradient is native. Arms at equal executor calls: sample+derive constants / sample+random
+   constants / derive everything (soft ops + constants). Problems: formulas with 1-2 constants (unit conversions,
+   'a vezes 1.8 mais 32'), 8 examples, 40 hidden. Same executor also repairs WIRING (the A1 failure) whenever a
+   request carries examples.
 
 ## 6. Review 2026-10-26 (gaps found, nothing rerun)
 

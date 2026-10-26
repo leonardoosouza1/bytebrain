@@ -37,6 +37,7 @@ MODEL = "Qwen/Qwen2.5-Coder-0.5B-Instruct"
 CACHE = "/media/llm-data/models/hf/hub"
 S_SYS = "Turn the Portuguese request into the JSON spec for the code generator. Answer with the JSON only."
 HOLD_D, HOLD_X = E.FRAMES_D[3], E.FRAMES_X[1]
+MAX_NEW = {"expr": 120, "steps": 200}   # steps are ~2x the tokens of the nested string; no cut-off at 5 calls
 
 
 def frame_of(text):
@@ -129,17 +130,31 @@ def main():
                     help="more request files whose texts/golds may not be trained on (default: <out>/para/requests.json)")
     ap.add_argument("--steps", type=int, default=0, help="fixed optimizer steps (like-for-like with another arm)")
     ap.add_argument("--tag-suffix", default="p", help="arm name suffix when --extra is used (s5p, s5v2, ...)")
+    ap.add_argument("--spec-format", choices=["expr", "steps"], default="expr",
+                    help="formula target: one nested expr string, or addressed steps s1 = op(x, y) (ledger #43 A1)")
+    ap.add_argument("--grammar-mask", action="store_true",
+                    help="eval only (--lora): greedy over tokens that keep a valid spec prefix (ledger #43 A0)")
     a = ap.parse_args()
+    assert a.lora or not a.grammar_mask, "--grammar-mask is an eval of a saved adapter: pass --lora"
     from peft import LoraConfig, PeftModel, get_peft_model
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     torch.cuda.set_per_process_memory_fraction(a.mem_frac)
     torch.manual_seed(a.seed)
     dev = "cuda"
-    tag = (f"student_{a.arm}{a.tag_suffix if a.extra else ''}_s{a.seed}" + ("_smoke" if a.smoke else "") if not a.lora else
-           os.path.basename(os.path.dirname(os.path.normpath(a.lora))))   # eval only: name of the trained arm
+    st = "st" if a.spec_format == "steps" else ""
+    if not a.lora:
+        tag = f"student_{a.arm}{a.tag_suffix if a.extra else ''}{st}_s{a.seed}" + ("_smoke" if a.smoke else "")
+    else:                                                # eval only: name of the trained arm, + mask and its format
+        tag = os.path.basename(os.path.dirname(os.path.normpath(a.lora)))
+        tag += ("_gm_st" if st else "_gm") if a.grammar_mask else ""
     odir = os.path.join(a.out, tag)
-    os.makedirs(odir, exist_ok=True)
+    if not a.lora:
+        os.makedirs(odir, exist_ok=True)
+    elif a.grammar_mask:                                 # the adapter's own format must match the grammar
+        fmt = json.load(open(os.path.join(os.path.dirname(os.path.normpath(a.lora)), "result.json"))).get(
+            "spec_format", "expr")
+        assert fmt == a.spec_format, f"adapter trained on {fmt}, mask asked for {a.spec_format}"
     tests = E.load_requests(a.out)
     tok = AutoTokenizer.from_pretrained(MODEL, cache_dir=CACHE, local_files_only=True)
     im_end = tok.convert_tokens_to_ids("<|im_end|>")
@@ -150,8 +165,10 @@ def main():
         odir = os.path.join(a.eval_dir, tag)
         os.makedirs(odir, exist_ok=True)
         model = PeftModel.from_pretrained(model, a.lora).merge_and_unload().eval()
-        res = evaluate(model, tok, im_end, json.load(open(os.path.join(a.eval_dir, "requests.json"))), dev)
-        res.update({"tag": tag, "lora": a.lora, "eval_dir": a.eval_dir})
+        res = evaluate(model, tok, im_end, json.load(open(os.path.join(a.eval_dir, "requests.json"))), dev,
+                       MAX_NEW[a.spec_format], a.spec_format if a.grammar_mask else None)
+        res.update({"tag": tag, "lora": a.lora, "eval_dir": a.eval_dir, "spec_format": a.spec_format,
+                    "grammar_mask": a.grammar_mask})
         json.dump(res.pop("raws"), open(os.path.join(odir, "raws.json"), "w"), ensure_ascii=False, indent=0)
         json.dump(res, open(os.path.join(odir, "result.json"), "w"), indent=1, ensure_ascii=False)
         print(json.dumps(res, ensure_ascii=False), flush=True)
@@ -172,6 +189,8 @@ def main():
         n_extra, extra_dropped = len(ex), len(raw_ex) - len(ex)
         pairs = pairs + ex * a.extra_reps
         random.Random(a.seed).shuffle(pairs)
+    if a.spec_format == "steps":                         # same pairs, same order; only the formula target changes
+        pairs = [(t, E.to_steps_spec(g)) for t, g in pairs]
     model = get_peft_model(model, LoraConfig(r=a.rank, lora_alpha=2 * a.rank, lora_dropout=0.0, task_type="CAUSAL_LM",
                                              target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj",
                                                              "up_proj", "down_proj"]))
@@ -212,39 +231,80 @@ def main():
         model.save_pretrained(os.path.join(odir, "lora"))
     model = model.merge_and_unload()                     # fused weights: same outputs, no LoRA overhead per token
     model.eval()
-    ev = evaluate(model, tok, im_end, tests[:6] + tests[-6:] if a.smoke else tests, dev)
+    ev = evaluate(model, tok, im_end, tests[:6] + tests[-6:] if a.smoke else tests, dev, MAX_NEW[a.spec_format])
     raws = ev.pop("raws")
     res = {"tag": tag, "arm": a.arm, "seed": a.seed, "train_pairs": len(enc), "dropped_equal_to_test": dropped,
            "extra": n_extra, "extra_dropped": extra_dropped, "extra_file": a.extra, "extra_reps": a.extra_reps,
-           "steps": steps, "train_s": train_s, "lora_params": n_lora, "loss_log": log, **ev}
+           "spec_format": a.spec_format, "steps": steps, "train_s": train_s, "lora_params": n_lora, "loss_log": log,
+           **ev}
     json.dump(raws, open(os.path.join(odir, "raws.json"), "w"), ensure_ascii=False, indent=0)
     json.dump(res, open(os.path.join(odir, "result.json"), "w"), indent=1, ensure_ascii=False)
     print(json.dumps(res, ensure_ascii=False), flush=True)
 
 
-def evaluate(model, tok, im_end, evalq, dev):
+def grammar_mask(tok, im_end, n_prompt, steps, ks=(64, 1024)):
+    """ledger #43 A0: greedy among the tokens that keep the text a valid spec prefix (E.spec_prefix_ok).
+    The argmax is tried first, so the mask equals plain greedy whenever plain greedy is grammatical (topk order among
+    bf16 ties differs from argmax). Then the top 64, then the top 1024, in score order; a token must add visible text
+    (empty / whitespace-only tokens would stall). None valid -> the scores are left as they are (.miss; the request
+    is then not masked and is reported as such). A complete spec admits only <|im_end|>."""
+    from transformers import LogitsProcessor
+
+    def ok(text, t):
+        new = (text + tok.decode([t])).lstrip()
+        return t != im_end and len(new) > len(text) and E.spec_prefix_ok(new, steps=steps)
+
+    class Mask(LogitsProcessor):
+        miss = forced = 0
+
+        def __call__(self, input_ids, scores):
+            text = tok.decode(input_ids[0, n_prompt:], skip_special_tokens=True).lstrip()
+            top = scores[0].argmax().item()
+            if E.spec_prefix_ok(text, complete=True, steps=steps):
+                keep = im_end
+            elif ok(text, top):
+                keep = top
+            else:
+                keep = next((t for k in ks for t in scores[0].topk(k).indices.tolist() if ok(text, t)), None)
+            if keep is None:
+                self.miss += 1
+                return scores
+            self.forced += keep != top
+            out = torch.full_like(scores, float("-inf"))
+            out[0, keep] = scores[0, keep]
+            return out
+    return Mask()
+
+
+def evaluate(model, tok, im_end, evalq, dev, max_new=120, gm=None):
+    """gm: None = plain greedy; "expr"/"steps" = greedy under the grammar mask of that spec format.
+    Under the mask, ms includes the mask's CPU time (not comparable with plain ms), and a forced token changes what
+    the model conditions on afterwards: "failures fixed by the mask" bounds the FORM failures, it is not a count."""
     raws, rows = {}, []
     with torch.no_grad():
         for q in evalq:
             ids = torch.tensor([tok(prompt(q["text"]), add_special_tokens=False).input_ids], device=dev)
+            mask = grammar_mask(tok, im_end, ids.shape[1], gm == "steps") if gm else None
             torch.cuda.synchronize()
             t1 = time.perf_counter()
-            out = model.generate(input_ids=ids, attention_mask=torch.ones_like(ids), max_new_tokens=120,
+            out = model.generate(input_ids=ids, attention_mask=torch.ones_like(ids), max_new_tokens=max_new,
                                  do_sample=False, eos_token_id=im_end, pad_token_id=tok.pad_token_id,
-                                 repetition_penalty=1.0, temperature=None, top_p=None, top_k=None)
+                                 repetition_penalty=1.0, temperature=None, top_p=None, top_k=None,
+                                 logits_processor=[mask] if mask else None)
             # plain greedy: the model's generation_config sets repetition_penalty 1.05 (hits repeated ops in trees)
             torch.cuda.synchronize()
             ms = round(1000 * (time.perf_counter() - t1), 1)
             raw = tok.decode(out[0, ids.shape[1]:], skip_special_tokens=True).strip()
-            raws[q["id"]] = {"raw": raw, "ms": ms}
+            raws[q["id"]] = {"raw": raw, "ms": ms, **({"gm_forced": mask.forced, "gm_miss": mask.miss} if mask else {})}
             try:
-                exact = json.loads(raw) == q["gold"]
+                exact = E.canon_spec(json.loads(raw)) == q["gold"]   # steps -> nested expr; else unchanged
             except json.JSONDecodeError:
                 exact = False
             fr = frame_of(q["text"])                     # a rewrite that happens to echo a frame head is still a rewrite
             frame = ("rewritten" if "orig_text" in q else "open" if fr is None else
                      "unseen" if fr in (HOLD_D, HOLD_X) else "seen")
-            rows.append({"id": q["id"], "split": q["split"], "exact": exact, "ms": ms, "frame": frame})
+            rows.append({"id": q["id"], "split": q["split"], "exact": exact, "ms": ms, "frame": frame,
+                         "forced": mask.forced if mask else 0, "miss": mask.miss if mask else 0})
     hl = [x for x in rows if x["split"] not in ("one", "open")]   # one: its op list is in training; open: our gold
     agg = {}
     for key in ("split", "frame"):
@@ -256,6 +316,10 @@ def evaluate(model, tok, im_end, evalq, dev):
             "exact_headline": round(sum(x["exact"] for x in hl) / max(1, len(hl)), 4),
             "exact_by": {k: f"{v[0]}/{v[1]}" for k, v in sorted(agg.items())},
             "ms_median": sorted(x["ms"] for x in rows)[len(rows) // 2],
+            **({"gm_requests_forced": sum(x["forced"] > 0 for x in rows),
+                "gm_requests_unmasked": sum(x["miss"] > 0 for x in rows),
+                "gm_tokens_forced": sum(x["forced"] for x in rows),
+                "gm_steps_unmasked": sum(x["miss"] for x in rows)} if gm else {}),
             "vram_peak_gb": round(torch.cuda.max_memory_allocated() / 2**30, 2), "raws": raws}
 
 

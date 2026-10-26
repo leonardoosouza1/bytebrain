@@ -285,3 +285,39 @@ Corpus index alone as generator (contexts capped at 8/16/32/48 bytes): parse 3.1
     understander reading the request (mostly the wrong formula tree); planner and writer never failed.
   - Judges (#36 #37): the Qwen-3B first judge is nearly useless (root stage 0.05 on natural failures); Sonnet as
     final judge, under `RUBRIC.md`, matched the oracle on 60/60 traces and its fixes repaired 39/40 failures.
+  - Student understander (#34): Qwen2.5-Coder-0.5B + LoRA trained on generator gold: belt 97.8% on the templated
+    set A and 85.6% on Sonnet-rewritten set B (3B few-shot: 78.8 / 74.7). Augmenting with Sonnet rewrites of training
+    texts (s5p) raised B to 89.1% but taught "main ⇒ formula" (held calculator frame 56 → 38/56); FAILED-ADAPT →
+    s5p2 (calculator rewrites that mention main) and #37 V2 (retrain on judge-corrected labels) queued 10-26.
+  - Code as a byte matrix (#6 #9, `BYTE-MATRIX.md`): indent birth is one byte (row ends with ':' → 1.000 / 1.000 on
+    clean code), indent death is not local (the plan decides), SVD of byte values does not compress (rank 4 costs
+    1.37× the bytes), the layout is low-rank (ink map rank 2: 96%), and indentation lives at exactly 1 row × 4
+    columns in a multi-scale pyramid.
+  - Next for #35: planner and writer never fail on the belt sets, so the "retrain the blamed stage" loop has no
+    natural planner/writer errors to learn from. Generate them where the planner is out of its training range
+    (calls6/8 trees), judge, retrain the planner on accepted fixes, and measure on held calls6/8.
+- **10-26 (afternoon): concept review #43, all runs stopped by the owner at 14:32.** Full text in
+  `CONCEPT-REVIEW.md`.
+  - The one principle behind every result that worked has three parts: an address (where am I), a truth checked at
+    every step, and copying one's own verified outputs. The ideas that failed each lacked one of the three:
+    unlikelihood (−26 pp), repair (= resampling), derive-from-random, and SVD of byte values.
+  - Student s5 on v2pool (593 Sonnet rewrites) passes the belt 441/593 = 74.4%: calculators 138/139, formulas
+    303/454. The understander is the root of 152/152 failures.
+  - 87 of the 151 formula failures (58%) use exactly the gold's set of ops. They have the right meaning in the wrong
+    form: arity 42, steps in reading order 32, answered as a calculator 18, infix 17.
+  - Cause of the wrong form: the templated training texts say the nesting with parentheses in Portuguese, while
+    natural requests are sequential.
+  - Opus audit, checked by me:
+    - V2 as designed is gold-gated, so it is cancelled. A4 replaces it with a gold-free version.
+    - The 3B judge is below a constant "fail" baseline (pass_agree 15/30 vs 20/30). Adapt it (A5); do not drop it.
+    - The τ-bank in `blockaddr.py` is `sigmoid(gate).cumsum()`, an integrator that holds the address, not the data.
+    - The belt writer is an `Embedding(len(SYM))` GRU, a learned lookup.
+  - Built without runs:
+    - A1, the addressed step spec `s1 = op(x, y)`, plus `--spec-format steps`.
+    - The A0/A2 grammar mask `spec_prefix_ok` plus `--grammar-mask`. Checks: 1892/1892 golds and every prefix
+      accepted; 600/600 agreement with `check_spec` on corruptions; 0 gold tokens forced with the real tokenizer.
+    - Review fixes in `parse_steps`: a unicode digit made it crash.
+  - Learned matrix factorization (#6): k=1 gives 9.4% at 4.6 bits/byte and k=2 gives 28.5% at 9.2 bits. Per-function
+    matrices memorize; they do not compress.
+  - Queue, waiting for his OK to use the GPU again: A0 (mask eval of s5) → A1 smoke + train → A8 s5p2 → A4 after the
+    blind set C (A3).

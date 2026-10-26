@@ -113,10 +113,36 @@ Multi-scale pyramid of the ink map: average blocks of rows × columns, upsample,
 
 Predictions: D1 1×4 ≥ 95% → 97.5% PASS; 4×8 < 60% → 23% PASS.
 
+## E. Learned factorization: "e se o próprio modelo ajusta matrizes?" (2026-10-26)
+
+Script `byte_matrix_learned.py`. Each function gets its own U (rows × k) and V (cols × k). One readout, shared by
+all functions, is Linear(k,128)-GELU-Linear(128,256) on u_r ⊙ v_c. Everything is fit by cross-entropy on byte
+identity, not byte value. Run: 300 clean functions, 2000 steps, CPU 4 threads.
+
+The run was stopped at 14:32 by the owner's request, after k = 2:
+
+| k | bytes exact | non-space bytes exact | storage, bits per non-space byte (fp16 U, V) |
+|---|---|---|---|
+| 1 | 60.2% | 9.4% | 4.6 |
+| 2 | 66.2% | 28.5% | 9.2 |
+
+- Storage grows linearly with k: 4.6 × k bits per non-space byte. Every k ≥ 2 already costs more than the raw
+  8 bits.
+- Prediction "no k reaches ≥ 90% of non-space bytes at < 8 bits" is therefore **PASS** for all k without running
+  k ≥ 4.
+- k = 1 is the only setting under 8 bits, and it recovers 9.4%.
+- The shared readout is not counted. Counting it would make the result worse.
+
+Concept reading:
+- The ".dna two matrices" trick compresses what is **shared across many inputs**: model weights, a readout, the
+  layout of code (ink map rank 2 = 96%).
+- It does not compress per-instance **content**. Content is symbols, and each function needs its own.
+- For code, the content belongs in discrete addresses and symbols (the planner plus a writer vocabulary). The
+  matrices belong in the shared model.
+
 ## Not done (declared)
 
-- His "e se o próprio modelo ajusta matrizes?": a learned factorization of code (the model fits U, V itself, e.g. on
-  one-hot or embedded bytes instead of raw byte values) was not run; only fixed SVD of byte values and of the ink map.
+- Learned factorization at k ≥ 4: not run. It is not needed for the verdict; see E.
 - Water lens (atoms eating the residual): not run.
 - No generation experiment uses these laws yet. The direct use would be:
   - indent birth as a hard rule in the GPU checker (it is already implied by the parser);

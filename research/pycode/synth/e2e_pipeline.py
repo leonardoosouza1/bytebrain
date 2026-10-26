@@ -281,6 +281,182 @@ def parse_expr(e):
     return tuple(out), ""
 
 
+STEP_RE = re.compile(r"s([0-9]{1,3}) = (\w+)\((\w+), (\w+)\)$", re.ASCII)   # ASCII: int() never sees "²"
+
+
+def steps_of(prefix):
+    """prefix tree -> addressed steps in post-order (ledger #43 A1): ["s1 = pct(b, a)", "s2 = mod(s1, a)", ...].
+    A request is said as a sequence ("take b percent of a, then the remainder of that by a"); each step gets an
+    address, so the understander never has to write the tree outside-in. The last step is the result."""
+    steps = []
+
+    def go(i):
+        t = prefix[i]
+        if t in ("a", "b"):
+            return t, i + 1
+        x, j = go(i + 1)
+        y, j = go(j)
+        steps.append(f"s{len(steps) + 1} = {t}({x}, {y})")
+        return f"s{len(steps)}", j
+    go(0)
+    return steps
+
+
+def parse_steps(steps, max_len=99):
+    """addressed steps -> prefix tuple; (None, reason naming the step) when malformed. A step used twice (a shared
+    sub-result) is expanded into the tree; a step never used is an error (the request said it, the formula lost it)."""
+    if not isinstance(steps, list) or not steps:
+        return None, "shape:steps"
+    trees, used = [], set()
+    for k, s in enumerate(steps, 1):
+        m = STEP_RE.match(s.strip()) if isinstance(s, str) else None
+        if not m or int(m.group(1)) != k:
+            return None, f"shape:step{k}"
+        op, sub = m.group(2), [m.group(2)]
+        if op not in BIN:
+            return None, f"oov:{op}"
+        for v in m.group(3, 4):
+            if v in ("a", "b"):
+                sub.append(v)
+            elif v[0] == "s" and v[1:].isdigit() and len(v) <= 4 and 1 <= int(v[1:]) < k:
+                sub.extend(trees[int(v[1:]) - 1])
+                used.add(int(v[1:]))
+            else:
+                return None, f"ref:step{k}"
+        if len(sub) > max_len:
+            return None, f"size:step{k}"
+        trees.append(tuple(sub))
+    dead = [k for k in range(1, len(steps)) if k not in used]
+    if dead:
+        return None, f"unused:step{dead[0]}"
+    return trees[-1], ""
+
+
+# ---- grammar mask (ledger #43 A0/A2): is this text a valid PREFIX of a spec in json.dumps form? Each parser returns
+# (end, incomplete) pairs; incomplete = the text ended inside a valid parse, so a continuation exists.
+
+def _lit(s, i, lit):
+    seg = s[i:i + len(lit)]
+    if not lit.startswith(seg):
+        return None
+    return (i + len(lit), False) if len(seg) == len(lit) else (len(s), True)
+
+
+def _expr_p(s, i, depth=0):
+    if i >= len(s):
+        return [(len(s), True)]
+    out = [r for r in (_lit(s, i, "a"), _lit(s, i, "b")) if r]
+    for op in BIN if depth < 30 else ():                 # 30 > any gold depth (5); check_spec has no cap
+        r = _lit(s, i, op + "(")
+        if not r or r[1]:
+            out += [r] if r else []
+            continue
+        for p, inc in _expr_p(s, r[0], depth + 1):
+            r2 = (p, True) if inc else _lit(s, p, ", ")
+            if not r2 or r2[1]:
+                out += [r2] if r2 else []
+                continue
+            for q, inc2 in _expr_p(s, r2[0], depth + 1):
+                r3 = (q, True) if inc2 else _lit(s, q, ")")
+                out += [r3] if r3 else []
+    return out
+
+
+def _calls_p(s, i):
+    def one(j):
+        return [r for r in (_lit(s, j, f'"{o}"') for o in OPS) if r]
+    out, frontier = [], one(i)
+    while frontier:
+        nxt = []
+        for p, inc in frontier:
+            if inc:
+                out.append((p, True))
+                continue
+            out += [r for r in (_lit(s, p, "]}"),) if r]
+            c = _lit(s, p, ", ")
+            if c:
+                out += [c] if c[1] else []
+                nxt += [] if c[1] else one(c[0])
+        frontier = nxt
+    return out
+
+
+def _steps_p(s, i, max_steps=12, max_len=99):
+    out, frontier = [], [(i, 1, frozenset(), ())]       # sizes[j]: tokens of step j+1's expanded tree (parse_steps)
+    while frontier:
+        nxt = []
+        for p, k, used, sizes in frontier:
+            head = _lit(s, p, f'"s{k} = ')
+            if not head or head[1]:
+                out += [head] if head else []
+                continue
+            args = ["a", "b"] + [f"s{j}" for j in range(1, k)]
+            for op in BIN:
+                r1 = _lit(s, head[0], op + "(")
+                if not r1 or r1[1]:
+                    out += [r1] if r1 else []
+                    continue
+                for x in args:
+                    r2 = _lit(s, r1[0], x + ", ")
+                    if not r2 or r2[1]:
+                        out += [r2] if r2 else []
+                        continue
+                    for y in args:
+                        r3 = _lit(s, r2[0], y + ')"')
+                        if not r3 or r3[1]:
+                            out += [r3] if r3 else []
+                            continue
+                        size = 1 + sum(1 if v in ("a", "b") else sizes[int(v[1:]) - 1] for v in (x, y))
+                        if size > max_len:
+                            continue
+                        u = used | {v for v in (x, y) if v[0] == "s"}
+                        if all(f"s{j}" in u for j in range(1, k)):      # close only when no step is left unused
+                            out += [r for r in (_lit(s, r3[0], "]}"),) if r]
+                        if k - sum(f"s{j}" in u for j in range(1, k + 1)) > 2 * (max_steps - k):
+                            continue                     # too many unused steps left for the steps that remain
+                        c = _lit(s, r3[0], ", ")
+                        if c and c[1]:
+                            out.append(c)
+                        elif c and k < max_steps:
+                            nxt.append((c[0], k + 1, u, sizes + (size,)))
+        frontier = nxt
+    return out
+
+
+def spec_prefix_ok(s, complete=False, steps=False):
+    """True when s can still grow into a valid spec (complete=True: s IS one). Formats: dispatch list, and the formula
+    as one nested expr (steps=False) or as addressed steps (steps=True)."""
+    ends = []
+    for head, body in (('{"main": "dispatch", "calls": [', _calls_p),
+                       ('{"main": "expr", "steps": [', _steps_p) if steps else
+                       ('{"main": "expr", "expr": "', lambda t, j: [((q, True) if inc else _lit(t, q, '"}'))
+                                                                    for q, inc in _expr_p(t, j)])):
+        r = _lit(s, 0, head)
+        if r:
+            ends += [r] if r[1] else [e for e in body(s, r[0]) if e]
+    return any(p == len(s) and not (complete and inc) for p, inc in ends)
+
+
+def canon_spec(spec):
+    """a steps spec -> the same spec as one nested expr (the gold format); anything else unchanged."""
+    if isinstance(spec, dict) and set(spec) == {"main", "steps"} and spec["main"] == "expr":  # extra keys: no credit
+        prefix, _ = parse_steps(spec["steps"])
+        if prefix is not None:
+            return {"main": "expr", "expr": expr_of(prefix)}
+    return spec
+
+
+def to_steps_spec(spec):
+    """gold spec -> addressed-steps spec; dispatch specs unchanged."""
+    if spec.get("main") != "expr":
+        return spec
+    prefix, why = parse_expr(spec["expr"])
+    assert prefix is not None, why
+    steps = steps_of(prefix)
+    assert steps, f"leaf-only formula {spec['expr']!r} has no steps form"
+    return {"main": "expr", "steps": steps}
+
+
 def check_spec(raw):
     """understander raw text -> (spec dict | None, bridged (world, tuple) | None, flags). The bridge is a rule."""
     try:
@@ -298,13 +474,20 @@ def check_spec(raw):
         if not ops:
             return s, None, fl + [flag("validator", "understander", "empty_spec")]
         return s, ("dispatch", ops), fl
-    e = s.get("expr")
-    if not isinstance(e, str):
-        return s, None, [flag("validator", "understander", "schema_error", "", raw)]
-    prefix, why = parse_expr(e)
+    if "steps" in s:                                     # addressed steps (A1); the nested expr string stays accepted
+        e = s["steps"]
+        prefix, why = parse_steps(e)
+    else:
+        e = s.get("expr")
+        if not isinstance(e, str):
+            return s, None, [flag("validator", "understander", "schema_error", "", raw)]
+        prefix, why = parse_expr(e)
     if prefix is None:
         kind = "oov_op" if why.startswith("oov:") else "expr_parse_error"
-        return s, None, [flag("validator", "understander", kind, why.split(":")[-1] if kind == "oov_op" else "", e)]
+        where = why.split(":")[-1]                       # oov: the bad id; steps: the step that broke (micro blame)
+        return s, None, [flag("validator", "understander", kind,
+                              where if kind == "oov_op" or (where.startswith("step") and where[4:].isdigit())
+                              else "", e)]
     return s, ("expr", prefix), []
 
 
@@ -451,6 +634,9 @@ def sendback_msg(flags):
             continue
         if f["kind"] == "oov_op":
             L.append(f'"{f["fn"]}" is not an operation id; use only the listed ids (for example maxx, not max).')
+        elif f["kind"] == "expr_parse_error" and f["fn"].startswith("step") and f["fn"][4:].isdigit():
+            L.append(f'{f["fn"].replace("step", "step s")} is wrong: each step is "sK = op(x, y)" numbered from s1, '
+                     "x and y are a, b or an earlier step, and every step except the last is used by a later one.")
         elif f["kind"] == "expr_parse_error":
             L.append("expr must be nested calls of add sub mul div mod maxx hyp avg pct, each with exactly two "
                      "arguments, leaves a and b only; no infix operators, no numbers, no other names. Keep the kind "
@@ -945,7 +1131,8 @@ def rubric_text():
 
 
 def evidence(t):
-    L = [f"REQUEST: {t['text']}", f"SPEC (understander output): {json.dumps(t['spec'], ensure_ascii=False)}",
+    L = [f"REQUEST: {t['text']}",                   # steps specs are shown as the nested expr the rubric documents
+         f"SPEC (understander output): {json.dumps(canon_spec(t['spec']), ensure_ascii=False)}",
          f"PLAN (planner output): {' '.join(t['plan']) if t['plan'] else '(none)'}", "CODE (assembled):", t["src"],
          "EXECUTION (bwrap facts: what the code returned; no expected values are given):"]
     for k, vals in t["facts"].items():

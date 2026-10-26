@@ -345,3 +345,19 @@ Corpus index alone as generator (contexts capped at 8/16/32/48 bytes): parse 3.1
   ran); CONCEPT-REVIEW §2 overstated (brackets 284/454; multiset ≤ 33%). Ledger #7/#10/#13 → PARTIAL; 12
   inference gates added to `bytebrain/CLAUDE.md`. Order after A1: #45 τ-bank rerun (CPU), #46/#47 saci-code,
   #24-26 guess-and-derive as learn-on-demand, then s5p2 / A4.
+- **10-26 (late night): his items #45, #26, #41, #43, #46 — numbers in the ledger.**
+  - #45 τ-bank (CPU, plan walker, 3 seeds): after two own bugs (10× lr copied onto the gate matrix; a 1/τ floor that
+    forbids holding), `cfc_hold` — 8 τ groups whose rate is a small net of the input, no floor — holds the name through
+    48 wait steps: test_a .743 vs fixed bank .013, gate-with-floor .017, GRU .942. During the wait 2 of 8 groups learn
+    rate 0.000 ("o dado fica lá"). Still −20 pp vs GRU; a learned surprise ("muda só sob estresse") not built.
+  - #26 gradconst v3.1 (n=200, caps tuned on a disjoint dev set): derivative +10.5 pp over tuned ES at len3
+    (.820 vs .715), +7 at len2, −1.5 at len1; ~2× fewer executions. v3's +33 pp / 12× was ES starved by its cap
+    (erratum in GUESS-AND-DERIVE.md). Guess is still an oracle stand-in.
+  - #41 serving: `synth/serve_belt.py` terminal (`--repl`) and HTTP (`--http 8140`, 127.0.0.1 only). GPU smoke:
+    parity 20/20 with the eval's raws; in-world requests ok in 1.1–1.8 s, of which the understander is 1.05–1.79 s and
+    planner + writer + bwrap ≈ 40 ms. HTTP front CPU-tested with a fake belt; GPU smoke queued (`saci_code/q46.sh`).
+  - #43 world_margin: s5's held calculator frame leans expr in 18/18 but by a median 3.5 nats (no verdict band);
+    steps-format s5st moved it to −7.9 (PASS for "steps made the world switch worse").
+  - #46 saci-code: step 2 measured (monitor fires on 106 failures and 44–45 passes); step 4 (rewind/resample/vote at the
+    fire point, `synth/saci_redo.py`) built, under Opus review, GPU queued after mix3.
+  - Agent rule from 10-26: code agents (review, writing, analysis) run on Opus only; Sonnet only for JSON/simple data.

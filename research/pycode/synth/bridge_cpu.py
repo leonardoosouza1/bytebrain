@@ -82,6 +82,12 @@ C1 K=0 cfc_gate and cfc_hold test_a >= .773 (bank - 5 pp: both start at the bank
 C3 K=48 cfc_gate <= cfc_hold - 10 pp (the 1/tau floor limits holders). KILL of the lr-mult explanation: K=0 cfc_gate
 mult 1 < .50.
 
+Adapt 4 (2026-10-26 ~19:10, registered before the run, launched 19:14). Adapt 3 K=48: cfc_hold .800/.559/.870 (train .999/.858/.999),
+GRU .942 at 1200 steps. Seed 1 did not fit train, so part of the gap may be budget. Rerun at 2400 steps, K=48, BOTH
+arms (gate 8, equal budget, 3 lrs each, extension on): cfc_hold lrs 6e-3,1e-2,2e-2 (1e-2 was interior), gru lrs
+6e-3,1e-2,2e-2 (its K=48 grid was already extended: .98 tie over 6e-3..2e-2, 4e-2 .933). D1 cfc_hold test_a >= .85 and train >= .95 on every seed. D2 gru - cfc_hold <= 10 pp at equal steps. KILL of
+'budget': cfc_hold at 2400 <= .76 (steps do not help -> capacity or optimisation, not budget).
+
 Usage: bridge_cpu.py smoke --out DIR
        bridge_cpu.py arm --arm NAME --out DIR [--steps 1200 --threads 2 --delay 0 --lrs 1e-3,3e-3]
 """

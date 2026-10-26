@@ -313,3 +313,54 @@ significado com vocabulário aberto.
    contínuos (constantes numéricas, limiares) e usar seleção por execução para os discretos.
 6. **Quando pular para Python real (S6)?** *Recomendo*: só quando S3 mostrar ≥ 80% com nomes/expressões nunca
    vistos; antes disso o modelo pequeno repete o 26M (forma sem significado).
+
+## 7. Leonardo's correction 2026-10-26 (supersedes the translator part of 3.0/3.1 and milestone S1)
+
+His words: "a ideia do qwen não é fazer boa parte e sim compreender... não vai dar o código, vai categorizar,
+organizar o pedido e transcrever de forma que os próximos passos da pipeline compreenda... um json... com
+hierarquia... main com child [sum, multi]... o que vai mandar é o treino... o próprio qwen pode julgar... votos e
+métricas de erros, apontando onde e no geral, o pedido foi 80%, então deriva para ajustar aqui no geral, mas no
+micro também, no writer".
+
+### 7.1 Roles (hard boundary)
+| part | does | never does |
+|---|---|---|
+| UNDERSTANDER (Qwen-derived, small) | pt-BR request -> hierarchical JSON spec: functions, args, who calls whom, intent per function, category, tests | write code |
+| PLANNER (ours) | JSON spec -> block plan per function (global address, tau bank per level) | — |
+| WRITER (ours) | block -> bytes (local) | — |
+| JUDGES (bwrap + Qwen/Sonnet votes) | score per level: request / module / function / block / line | approve training data alone (only bwrap does) |
+
+### 7.2 Spec JSON (draft shape, to iterate)
+```json
+{"request": "crie uma calculadora científica", "category": "calculator",
+ "entry": {"name": "main", "args": ["op", "a", "b"], "role": "dispatch", "calls": ["add", "hyp", "fact"]},
+ "functions": [
+   {"name": "add",  "args": ["a", "b"], "intent": "soma",       "uses": []},
+   {"name": "hyp",  "args": ["a", "b"], "intent": "hipotenusa", "uses": ["sqrt", "add", "square"]},
+   {"name": "fact", "args": ["a"],      "intent": "fatorial",   "uses": ["mul"]}],
+ "tests": [{"call": "hyp(3, 4)", "expect": 5.0}]}
+```
+The planner reads this tree instead of the name: macro = entry/functions/uses (slow tau), micro = intent -> blocks.
+
+### 7.3 How the understander gets Qwen's knowledge (options, already proven pieces in other projects)
+1. Distil: a big teacher (Qwen3-4B / Coder-3B, local) writes specs for many pt-BR requests; keep only specs whose
+   generated program passes bwrap; fine-tune Qwen-0.5B (LoRA, proven on this GPU in iara_online_learn.py) on them.
+2. Grammar-constrained decoding (GBNF) so the output is always valid JSON of this schema.
+3. Sub-network: GA neuron mask that keeps only the "understand + organise" capacity (surviving subnetworks, 07/01).
+4. Byte bridge: spec is text/JSON = bytes, our byte side reads it natively (wisdom bridge, 07/06).
+
+### 7.4 Located error -> which part learns ("deriva no geral e no micro")
+```
+judge vector per request:
+  request_score   (e.g. 80% of tests)            -> overall
+  per function    io_frac, missing/extra function -> MACRO error  -> understander / planner
+  per block       first_wrong_unit, text diff     -> MICRO error  -> writer
+  votes           bwrap (truth) + Qwen + Sonnet  -> where; LLM votes only locate, never decide
+credit assignment: the located error picks which module gets the training example / gradient.
+  fast loop (inference): derive the router logits of the wrong level only, until |dloss|~0
+  slow loop (training) : verified fixes become training data for that module (weights change)
+```
+
+### 7.5 What must be built (ledger #32-#35)
+spec schema + validator; teacher spec generation + bwrap filter; understander fine-tune; planner reading JSON
+tree; per-level judge vector (partial_score.py extended to function/module level); credit routing; votes.

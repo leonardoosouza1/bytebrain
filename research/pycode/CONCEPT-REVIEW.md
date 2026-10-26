@@ -2,6 +2,13 @@
 
 His request (14:30): "faça uma análise mais profunda do que está dando certo, reveja os conceitos e ajuste".
 
+> **Errata (review #44, REVIEW-44.md 1.5-1.6, re-checked):**
+> (1) §2 "natural requests have no parentheses" is wrong: 284/454 v2pool formula rewrites keep brackets and pass
+> 76.4%; the 170 without pass 50.6%. (2) The §2 table sums to 85, not 87, and counts the op SET; with repeats
+> (multiset) at most 50/151 (≤ 33%) carry the gold's operations. (3) §3 "planner + writer ~162k": the belt is
+> `multifn.Writer` (a lookup, ~45k) + two planners (~149k each), about 343k (agent count). (4) Line 5 and §5 "nothing
+> is running" were true at 14:32 only; A0 ran and A1 is running (§7).
+
 All jobs were stopped at 14:32 at his request. Nothing in this file was produced by a new training or GPU run.
 
 The numbers come from artefacts that were already written:
@@ -71,7 +78,7 @@ The 151 formula failures, classified from the raw student output:
 | infix, `mod(a, b) + div(a, b)` | 17 | (operators written as symbols, not counted) |
 | parseable but a different tree | 41 | 20 |
 | other | 1 | 0 |
-| **total** | 151 | **87 (58%)** |
+| **total** | 151 | **87 (58%)** (erratum: column sums to 85; op set, not multiset) |
 
 **Mechanism.**
 - People write a formula as a **sequence**: "pega b por cento de a, calcula o resto disso por a e multiplica por b".
@@ -80,11 +87,11 @@ The 151 formula failures, classified from the raw student output:
 - The training texts never needed that reversal. `verbalize()` in `e2e_pipeline.py` writes the nesting with
   parentheses inside the Portuguese ("a média de (o maior entre b e a) e b"), so the student learned to copy
   parentheses.
-- Natural requests have no parentheses. The student then writes the steps in reading order:
+- Natural requests have no parentheses (erratum: 284/454 do; see top). The student then writes the steps in reading order:
   - as a comma list;
   - as extra arguments;
   - or in the only sequential container the spec offers, the calculator list.
-- In 58% of the formula failures it had exactly the right operations.
+- In 58% of the formula failures it had exactly the right operations (erratum: right op set; with repeats ≤ 33%).
 
 This is the address principle again. Building the tree needs a place to hold intermediate results, and the spec
 language gives the understander none.
@@ -116,7 +123,7 @@ e mente".
 
 | goal | state | evidence |
 |---|---|---|
-| cheap | planner + writer ~162k params, 0.3 ms + 0.04 ms per request. The understander (494M + 8.8M LoRA) is 99.8% of the latency (1.85 s) and holds 100% of the failures. | `v2pool/summary_student_s5.json` lat_ms |
+| cheap | planner + writer ~162k params (erratum: ~343k, see top), 0.3 ms + 0.04 ms per request. The understander (494M + 8.8M LoRA) is 99.8% of the latency (1.85 s) and holds 100% of the failures. | `v2pool/summary_student_s5.json` lat_ms |
 | intelligent | inside the closed world (15 ops, ints a/b, ≤ 8 calls) the belt reaches 97.8% templated and ~86–89% natural. Outside it there is nothing. | README §7 |
 | learns on demand | **not measured.** Adding one operation means retraining the understander, planner and writer. No test counts how many examples or seconds that costs. | — |
 | light and versatile | light yes. Versatile no: one closed vocabulary. | — |

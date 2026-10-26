@@ -207,7 +207,8 @@ Corpus index alone as generator (contexts capped at 8/16/32/48 bytes): parse 3.1
   Diagnosis of loc_ce on test_b (3200 samples): exact 80.3% (self3 16.2%); first wrong line 0:2, **1:620**, 2:9.
   Middle-line errors fell 2474 -> 620 but are still 98% of what is left (top: sort->double 41, square->negate 32).
 
-  Lessons: (4) pointing at the error with unlikelihood HURTS (-33 pp on test_b vs plain CE on verified bodies);
+  Lessons: (4) pointing at the error with unlikelihood HURTS (-33 pp on test_b vs plain CE on verified bodies; erratum after the
+  unpadded re-eval: -26 pp, see below);
   copying what is right teaches more than pushing away what is wrong. First loc version collapsed to exact 0.0
   after one round (UL weight 1, 90% of examples negative). (5) The law mask helps where the name length was trained
   and hurts on longer names when used at eval (forces a duplicate line); used only for PROPOSALS it is the lever.
@@ -274,7 +275,8 @@ Corpus index alone as generator (contexts capped at 8/16/32/48 bytes): parse 3.1
   world where every answer can be checked: a calculator of 15 operations, or a `main(a, b)` that returns a formula
   (a call tree). Ledger `USER-REQUESTS.md` #12–#42 holds his requests with status; details live in
   `ARCHITECTURE.md` (what trains, what is rule), `GUESS-AND-DERIVE.md` (#24–#26), `PIPELINE-VALIDATION.md` (belt).
-  - Address planner `synth/blockaddr.py` + byte writer `synth/bytewriter.py`: exec/pass 100% on len3–6; smallest
+  - Address planner `synth/blockaddr.py` + byte writer `synth/bytewriter.py`: exec/pass 100% on len3–6 (erratum, review #44: all
+    writer runs sat on planner seed 4, one of the best of 7; planner len6 over 7 seeds: mean .76, worst .13); smallest
     fully executable writer d32 (13k params, 3/3 seeds). Qwen2.5-0.5B prompted (not trained on the task, so not
     like-for-like): 46% test_a, 8–10% len4–6.
   - Functions that depend on functions (#22): interleaved plan (per op: deps, def, dispatch) generates the full
@@ -327,3 +329,9 @@ Corpus index alone as generator (contexts capped at 8/16/32/48 bytes): parse 3.1
     A whole-vocabulary last tier removed the 4 requests the top-1024 could not hold. CONCEPT-REVIEW.md §7.
   - A1 smoke (steps format, 30 steps): 16755 pairs, 5 dropped, outputs in steps form, 0/12 exact (the old 30-step
     smoke also gave 0/12). A1 full is running: train 523 steps, then A, B, v2pool and belts.
+- **10-26 (night): review #44 (4 Opus agents, read-only) — `REVIEW-44.md`.** Re-checked: the "100% len3-6"
+  writer sat on the best planner seed (len6 over 7 seeds: mean .76); judge-fix acceptance is gold-gated; Sonnet
+  never faced a constant-blamer baseline; 8 runs were never written down (τ-bank CfC lost to GRU, control never
+  ran); CONCEPT-REVIEW §2 overstated (brackets 284/454; multiset ≤ 33%). Ledger #7/#10/#13 → PARTIAL; 12
+  inference gates added to `bytebrain/CLAUDE.md`. Order after A1: #45 τ-bank rerun (CPU), #46/#47 saci-code,
+  #24-26 guess-and-derive as learn-on-demand, then s5p2 / A4.

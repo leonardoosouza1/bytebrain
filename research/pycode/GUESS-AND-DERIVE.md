@@ -82,10 +82,14 @@ Monte Carlo: whole program right .44 / .29 / .19 for len2/3/4), one guess per pr
 | len2 io | .475 | .875 | **.975** | .85 | .525 | .775 |
 | len3 io | .40 | .675 | **.825** | .65 | .40 | .425 |
 | len3 median work (apps) | 0 | 3525 | 4 | | | |
+| len4 io (n=40, 10-26 18:32) | .525 | .775 | **.925** | .825 | .50 | .475 |
+| len4 mean work (apps) | 0 | 52875 | 973 | 56870 | 181538 | 81681 |
 
 Reading: the guess carries the result; the derivative helps it (+27.5 pp at len3) but drawing samples from the
 guess's own distribution helps more for ~1/1000 of the work. Over discrete op slots the gradient direction is not
-what solves it. Ambiguity on len2 (exact enumeration): 253 programs fit, 240 output-equivalent. len4 queued.
+what solves it. Ambiguity on len2 (exact enumeration): 253 programs fit, 240 output-equivalent. len4 (`main_l4`):
+P2 PASS (fit8 +37.5 pp, io +25 pp over guess alone), KILL not triggered, P3 holds again (sampling .925 vs derive .775 at
+1/54 of the work).
 Adaptation: derivative on what is continuous (constants, thresholds, the calc ops), sampling on the discrete slots.
 
 **v3, 10-26 night, the derivative where it is native (`synth/gradconst.py`, `gradconst/rep_len{1,2,3}/gradconst.json`).**

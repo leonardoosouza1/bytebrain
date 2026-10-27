@@ -6,6 +6,12 @@
 - Cross-project handbook: `../META/handbook-llm/README.md`.
 
 ## Request discipline (pycode line) — read before anything else
+0. ABSOLUTE RULE (Leonardo, 10-27): he has the vision, you validate it. Every item he asks is built AND tested in
+   HIS formulation in the same session — never listed as "not tested", never swapped for your own variant.
+   Real validation = real data/model path, GPU per project rule, positive control, baselines, >= 3 seeds, equal
+   budgets; a CPU smoke is never a verdict. Agents: Opus only for code, full-context briefs; their code gets your
+   diff read + an independent Opus code review/QA + your re-check of the headline number BEFORE you report it.
+   A negative needs the own-bug check and the review first, then adapt and rerun.
 1. First read research/pycode/USER-REQUESTS.md, then README section 7.
 2. Any idea or request from Leonardo becomes a ledger row, his words quoted, in the SAME turn.
 3. Every work turn starts with "Working on #N". OPEN items run oldest-first unless he reorders.

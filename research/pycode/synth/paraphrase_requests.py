@@ -75,6 +75,8 @@ def main():
     ap.add_argument("--world", choices=["any", "dispatch", "expr"], default="any", help="--from-train: spec kind")
     ap.add_argument("--gen-extra", default="", help="extra style instruction appended to the rewrite prompt")
     ap.add_argument("--name", default="train_para", help="--from-train: output file stem")
+    ap.add_argument("--exclude", nargs="*", default=[],
+                    help="--from-train: request files whose texts, orig_texts or golds may not be sampled (ledger #7)")
     a = ap.parse_args()
     os.makedirs(a.dst, exist_ok=True)
     cwd = os.path.join(a.dst, "sonnet_cwd")
@@ -85,6 +87,12 @@ def main():
         import student_understander as SU
         pairs, _ = SU.train_pairs("s5", a.seed, tests)
         pairs = [p for p in pairs if a.world == "any" or p[1]["main"] == a.world]
+        ex = [q for f in a.exclude for q in json.load(open(f))]
+        bad_t = {q["text"] for q in ex} | {q["orig_text"] for q in ex if "orig_text" in q}
+        bad_g = {json.dumps(q["gold"], sort_keys=True) for q in ex}
+        n0 = len(pairs)
+        pairs = [p for p in pairs if p[0] not in bad_t and json.dumps(p[1], sort_keys=True) not in bad_g]
+        print(json.dumps({"pairs": n0, "excluded": n0 - len(pairs), "exclude_files": a.exclude}), flush=True)
         pairs = random.Random(a.seed).sample(pairs, a.from_train)
         reqs = [{"id": f"t{i:04d}", "split": "train", "text": t, "gold": g} for i, (t, g) in enumerate(pairs)]
     else:  # open: gold is our arbitrary choice for "calculadora científica", a rewrite cannot be checked against it

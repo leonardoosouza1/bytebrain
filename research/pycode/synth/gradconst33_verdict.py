@@ -23,6 +23,15 @@ Differences are paired by problem (same seeds 10_000 S + i in both modes and in 
 Reported, not judged: every length's derive - ES with CI in both modes, median executions on the problems both solve,
 paired change vs v3.1 (gradconst31/run_len*) per arm, the caps each run used.
 
+Amendment 10-26 ~21:55 (Opus review of this script, BEFORE any test result; tune on dev seeds only had run):
+  A1 the +-5 pp tolerances of R1/R2 compare counts out of 200 (|k - 200 * ref| <= 10): float `abs(.57 - .62) <= .05` is
+     False, so a value exactly on the registered bound was graded FAIL.
+  A2 run settings asserted: n 200, budget 6000, noise 1.5, soft_steps 100, lens == the length, not --legacy / --v31,
+     and the caps of every length equal the mode's tuned best in DIR/../tune_<mode>/tune.json with no grid-edge flag.
+  A3 PASS and KILL both true is reported as a conflict (cannot happen at n 200: a lower bound > 0 pushes the upper bound
+     to ~.04 > .03); the caps are printed next to the len3 CIs (no-stall: a wrong program costs exactly its cap, so
+     unequal caps are part of what the gap measures).
+
 usage: gradconst33_verdict.py OUT.json STALL_DIR NOSTALL_DIR [V31_DIR]
 """
 import json
@@ -34,6 +43,23 @@ import numpy as np
 
 LENS = (1, 2, 3)
 V31_SOFT = {1: .845, 2: .620}
+N = 200
+
+
+def within(x, ref, pp=5):
+    """A1: |x - ref| <= pp points, compared as counts out of N (x is a rate of N problems)."""
+    return abs(round(x * N) - round(ref * N)) <= pp * N // 100
+
+
+def check_args(args, S, mode, tune):
+    """A2: the run is the registered one."""
+    exp = {"n": N, "budget": 6000, "noise": 1.5, "soft_steps": 100, "lens": str(S), "legacy": False}
+    bad = {k: args.get(k) for k, v in exp.items() if args.get(k) != v}
+    assert not bad and not args.get("v31"), (mode, S, bad, args.get("v31"))
+    cd, ce = args["per_prog_derive"] or args["per_prog"], args["per_prog_es"] or args["per_prog"]
+    for arm, cap in (("sample_derive", cd), ("sample_es", ce)):
+        t = tune[arm]
+        assert cap == t["best"] and not t["best_at_top_edge"] and not t["best_at_bottom_edge"], (mode, S, arm, cap, t)
 
 
 def load(d, S):
@@ -63,11 +89,14 @@ def main():
     v31 = sys.argv[4] if len(sys.argv) > 4 else None
     res = {"modes": {}, "R": {}, "verdict": None}
     rows = {}
+    tunes = {}
     for mode, d in dirs.items():
         res["modes"][mode] = {}
+        tunes[mode] = json.load(open(os.path.join(os.path.dirname(os.path.abspath(d)), f"tune_{mode}", "tune.json")))
         for S in LENS:
             args, rs = load(d, S)
             assert args["stall"] == (mode == "stall"), (mode, S, args["stall"])
+            check_args(args, S, mode, tunes[mode])
             rows[mode, S] = rs
     for S in LENS:                                            # same problems in both modes (paired)
         assert [r["truth"] for r in rows["stall", S]] == [r["truth"] for r in rows["nostall", S]], S
@@ -95,10 +124,10 @@ def main():
     R = res["R"]
     s3, n3 = M["stall"]["len3"], M["nostall"]["len3"]
     sd = {S: M["stall"][f"len{S}"]["io"]["soft_derive"] for S in LENS}
-    R["R1"] = {"pass": .40 <= sd[3] <= .55 and all(abs(sd[S] - V31_SOFT[S]) <= .05 for S in (1, 2)),
+    R["R1"] = {"pass": .40 <= sd[3] <= .55 and all(within(sd[S], V31_SOFT[S]) for S in (1, 2)),
                "soft_derive_stall": sd, "soft_derive_nostall": {S: M["nostall"][f"len{S}"]["io"]["soft_derive"]
                                                                 for S in LENS}}
-    R["R2"] = {"pass": abs(s3["io"]["sample_es"] - .715) <= .05 and .05 <= s3["derive_minus_es"] <= .15,
+    R["R2"] = {"pass": within(s3["io"]["sample_es"], .715) and .05 <= s3["derive_minus_es"] <= .15,
                "es_io_len3": s3["io"]["sample_es"], "derive_minus_es_len3": s3["derive_minus_es"]}
     R["R3"] = {"pass": n3["io"]["sample_derive"] <= s3["io"]["sample_derive"] and 0 <= n3["derive_minus_es"] <= .10,
                "derive_io_len3": {"stall": s3["io"]["sample_derive"], "nostall": n3["io"]["sample_derive"]},
@@ -110,7 +139,9 @@ def main():
     res["gate1"] = {"pass": all(all(v.values()) for v in g1.values()), "detail": g1}
     lo = {m: M[m]["len3"]["ci_derive_minus_es"][0] for m in dirs}
     hi = {m: M[m]["len3"]["ci_derive_minus_es"][1] for m in dirs}
-    if not res["gate1"]["pass"]:
+    if lo["nostall"] > 0 and lo["stall"] > 0 and hi["nostall"] < .03:      # A3
+        v = "CONFLICT (PASS and KILL both hold)"
+    elif not res["gate1"]["pass"]:
         v = "NO VERDICT (gate 1)"
     elif lo["nostall"] > 0 and lo["stall"] > 0:
         v = "PASS"
@@ -132,7 +163,8 @@ def main():
                                               for a in ("sample_derive", "sample_es", "soft_derive")}
     json.dump(res, open(out_path, "w"), indent=1)
     print(json.dumps({"verdict": v, "R": {k: R[k]["pass"] for k in R}, "gate1": res["gate1"]["pass"],
-                      "len3_ci": {m: M[m]["len3"]["ci_derive_minus_es"] for m in dirs}}, indent=1))
+                      "len3_ci": {m: M[m]["len3"]["ci_derive_minus_es"] for m in dirs},
+                      "caps": {m: M[m]["len3"]["caps"] for m in dirs}}, indent=1))
 
 
 if __name__ == "__main__":

@@ -435,3 +435,7 @@ Corpus index alone as generator (contexts capped at 8/16/32/48 bytes): parse 3.1
     seed (`--data-seed` added, every arm on data seed 1); T falls back to G, not V; new arm Ts (teacher labels on
     G's texts) separates relabelling from coverage; Sonnet prompt listed wrong expr ops (fixed); teacher gate
     >= 90% valid. Queue is now `q7b.sh` (same order); #7 starts after a second Opus review of the fixes.
+  - #3 mix5 (confirmatory, 12 fresh seeds): REFUTED on the registered metric. The corpus mirror as a
+    product-of-experts mixer raises `runs` by only +1.4 pp (CI upper < +4 pp for both arms); it nudges the model to
+    short functions that parse, not to code that runs. Not dropped (rule 7): next adaptation = mirror as a
+    per-function check + resample, after #7/#12.

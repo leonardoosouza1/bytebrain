@@ -162,10 +162,243 @@ AMENDMENT C (2026-10-27 13:01 from `date`, independent review, before any full s
      "MECHANISM NOT ENGAGED" (the comparison stands as stated but is not evidence for or against his tau bank) and
      KILL is not issued: own-bug check + adaptation (rule 7) instead.
 
+AMENDMENT D (2026-10-27 17:00 from `date`, ledger #54(A), new arm `stress2`; the 5 old arms are bit-identical:
+  fixed-seed init + teacher-forced logits + greedy + 20 train steps hashed before/after the edit, all equal).
+  Why: the full run (full/report13.json, verdict_amendment_B.mechanism) measured the `stress` slow rate at .87-.90
+  pre-eos in 7/7 seeds (collapsed 5/7): it is a CfC, not his "T so large the data stays there and only changes under
+  stress". stress2 makes the hold the DEFAULT and keeps learning alive:
+  arm stress2  StressCell2. State = [fast H/2 | slow H/2 in 4 groups, tau 16, 64, 256, 1024]; same Heads + eq. 10
+          candidate c_t as cfc. Fast units: x_f = c_f (cfc write, rate 1: learning never depends on the slow gate,
+          which was the B11 failure with only 1/8 fast units). Slow group g:
+              s += (c_s - s) * (1/tau_g + (1 - 1/tau_g) * open_g)      (closed -> leak 1/tau_g = hold)
+              open_g = 1[logit_g > 0] (HARD, in training and eval: no train/eval mismatch), straight-through
+                       gradient via sigmoid(logit_g): a closed gate still receives gradient (B11 avoided)
+              logit_g = softplus(w1_g) (surprise_t - 1) + softplus(w2_g) (log(dis_g + 1e-3) - log .1) + gb_g
+              surprise_t = -log p_{t-1}(prev symbol) under the planner's own previous output (log V at START):
+                       in greedy decoding prev is its own argmax -> no gold at eval; dis_g = mean_g (c_s - s)^2
+                       (what arrives contradicts what is held). Both detached (signals, not paths).
+              w >= 0 by softplus: opening is MONOTONE in stress; training tunes sensitivity/threshold only, it
+              cannot learn a content write gate (that would be an LSTM gate, not his stress). Init w = 1, gb = -2:
+              closed when the input was predicted (surprise ~0) unless dis is ~e^2 x .1.
+          Rate penalty: RATE_W * relu(open_rate - RATE_TARGET), open_rate = straight-through mean over real decoder
+              steps and slow groups, RATE_TARGET .2, RATE_W 1. Gate scalars w1, w2, gb: no weight decay (as stress).
+          Choice vs alternatives: hard-concrete / Bernoulli-ST sample in training but threshold at eval (mismatch,
+              and the eval store would be written by a different rule than the trained one); a soft gate with a bias
+              init near 0 is the B11 gradient-starved state. Deterministic hard gate + ST keeps write/hold binary as
+              he described and the backward alive.
+          params: U matched to gru (149 788 vs 149 220, +0.38%; cfc 149 776), asserted within 2% of gru and cfc.
+  Instruments (stress2_stats, greedy on len6[:256]): slow_rate_all, slow_rate_pre_eos (incl. first eos),
+      slow_rate_pre_eos_t>=1 (t0 always reads START = maximal surprise: the "birth" write), per-group rates, and for
+      t>=1 pre-eos steps the correlation of the open fraction with post-hoc gold proxies (never fed to the net):
+      wrong_now / wrong_prev (greedy token != gold), first_wrong_now, block_start_now/prev (op:/fin: emitted), and
+      with surprise. Ablations on len3..len6 plan_exact: zero_slow (store zeroed every step), closed_after_t0 (only
+      the START write, then hold: isolates the stress rewrites), force_open (slow rate 1).
+  Seen before this prediction (CPU smoke, 2 threads, 1500 steps; declared, not a verdict): seed 0 lr 3e-3 len6
+      plan_exact .4175 (cfc s0 .995, gru s0 .565 at the same lr on CPU), seed 0 lr 1e-3 .9875, seed 1 lr 3e-3 .99;
+      slow_rate_all .050-.056, pre_eos .079-.091, t>=1 .0003-.010; zero_slow -> 0.0 on every length (all 3 runs);
+      force_open len6 .01-.11; gate params moved < .15 from init.
+  PREDICTION D (GPU, synth2, 7 seeds 0-6, 1500 steps, lrs 1e-3/3e-3/1e-2, plan_exact len6 mean; ref numbers = the
+      full run: gru .9925/.7936/.6696, cfc .9993/.9296/.8654, stress .9971/.9264/.8411):
+    D1 gate: slow_rate_pre_eos .06-.12 in 7/7 seeds at every lr (< .3 always, the requirement); t>=1 < .03: in
+       practice a store written at birth (START) and then held, rarely rewritten. corr(open, wrong_prev) > 0 in
+       >= 5/7 seeds at lr 3e-3 (open steps are uncertain steps); corr with block_start ~0 (|r| < .1).
+    D2 accuracy: lr 1e-3 stress2 .97 (.90-1.0), INCONCLUSIVE or PASS vs all three (ceiling); lr 3e-3 stress2 .85
+       (.65-.95), SD .15, below cfc/stress by ~.08 (half the units write per step), above gru mean; vs gru
+       INCONCLUSIVE, vs cfc INCONCLUSIVE (P(LOSES) ~25%), vs stress INCONCLUSIVE; lr 1e-2 stress2 .75 (.5-.9).
+       Confidence ~50% on the 3e-3 interval.
+    D3 mechanism (his test): zero_slow hurts EVERY length to ~0 (the net is built around the birth snapshot), so
+       "hurts len5/6 more than len3/4" in absolute drop is NOT discriminative there (floor); predicted true in <= 3/7
+       seeds (drops tie at ~1.0). closed_after_t0: |drop| <= .01 on every length in >= 5/7 seeds = the stress
+       rewrites after t0 do no work; if instead closed_after_t0 drops len5/6 by > .05 more than len3/4 in >= 4/7
+       seeds, the stress-gated rewrites carry long-function state (his mechanism engaged beyond the birth write).
+    Verdict (report54, per lr, paired by seed, Bonferroni over 3 comparisons, t_.99167,6 = 3.287, margin .10, same
+       BETTER/PASS/LOSES/INCONCLUSIVE calls as Amendment A). LOSES vs cfc at 3e-3 with D3 "rewrites do no work" =
+       the tau bank is a snapshot here, not a stress memory -> own-bug check + adapt (rule 7), not a kill.
+
+AMENDMENT E (2026-10-27 17:13 from `date`, ledger #54(A), registered BEFORE any training on the new world; the 6 old
+  arms gru/cfc/ltc/lstm/stress/stress2 are bit-identical: bitid.py hashes (init, logits, greedy, 20 train steps) equal
+  before/after, scratchpad bitid54e_before.json == bitid54e_after.json).
+  Why: on synth2 every fact the planner needs is in the input at step 0, so a mid-sequence rewrite is never needed
+  (stress2 smoke: open at t0, t>=1 rate .0006; only-t0-write == normal). His example is a fact that CHANGES: "def sum"
+  whose body has one sign flipped. World `amend` (synth/amend54.py, docstring = full spec): item 0 states an operator
+  (f<v>), x<v> items later CORRECT it (half of them to the sign partner add<->sub ...), `ret` items must output the
+  CURRENT operator, n<d> fillers are copied. The first `ret` after a correction sits D items later (train D 1-16;
+  test_long D 17-32); before the correction the old value must be emitted. Splits val/test_iid (train dist),
+  test_pos (amends only at item index % 4 == 0, never in train), test_long (D 17-32), test_multi (3-4 amends, up to 86
+  items vs train <= 60), test_hold (control: no amend, D 1-32). Steps 2000 for every arm (amend54.STEPS), batch 48, same
+  lr schedule/clip/AdamW as every world. Params (amend vocab 21): gru 146 904; cfc 147 460, ltc 146 996, lstm 147 412,
+  stress 147 232, stress2 147 472, stress3 147 232 (all within 0.4%).
+  arm stress3 (review M2, 10-27: at greedy eval stress2's surprise is its own uncertainty, never "I was wrong"; trained
+      gb -2.1 / w .9 need surprise >~ 2, measured greedy max .81, so stress2 may never open after t0 on ANY world):
+      StressCell3 = stress2 + input surprise: P = Linear(H, 16) predicts a fixed random projection of the address read
+      r_t from x_{t-1} (aux mse, AUX_W .1, trains only P); zin = log(mse_t + 1e-3) - log(running mean_{k<t} mse + 1e-3)
+      (causal, per sequence, detached, 0 at t0); logit += softplus(w3) zin, softplus(w3) init 2 (open when the input is
+      ~e^1.5 = 4.5x less predictable than this sequence's average, other terms neutral). Rate penalty mask excludes t0
+      (stress2 keeps its mask). Still monotone in stress (w3 >= 0): no content gate. stress2 runs UNCHANGED as well.
+  Baselines (amend54.py baselines, same scorer; oracle on every non-`ret` position; measured 17:1x before this text,
+      data only): primary test_long amend_first_use: const .116, never_update 0, recent4/8_else_first 0, oracle 1.
+      test_iid amend_first_use: const .14, never_update 0, recent4 .24, recent8 .49; hold_long 1.0 for never_update.
+  PRIMARY = test_long amend_first_use (first `ret` after the correction, D 17-32), lr 3e-3, 7 seeds 0-6, GPU.
+  PREDICTION E (means over 7 seeds, lr 3e-3; confidence ~40% on each interval):
+    E1 accuracy primary: gru .75 (.40-.95), lstm .80 (.45-.97), cfc .30 (.10-.60: no additive carry, B3), ltc .50,
+       stress .40, stress2 .30 (.10-.60: slow store closed after t0 -> holds the BIRTH value, the amend must ride on the
+       fast cfc half), stress3 .70 (.35-.95). test_iid amend_long (D 10-16): gru .95, cfc .60, stress2 .55, stress3 .90.
+       test_hold hold_long: stress2 .90 and stress3 .90 (birth write + hold), cfc .50, gru .95.
+    E2 gate (cell_stats, test_iid/test_long greedy): stress2 amend_window open rate < .10 and ratio amend/elsewhere
+       < 2 or undefined in >= 4/7 seeds (not engaged). stress3: amend_window open rate >= .50, elsewhere <= .10,
+       ratio >= 5 in >= 5/7 seeds; amend_event_hit >= .70.
+    E3 ablations (stress3, test_long/test_hold): freeze_after_t0 (slow rate exactly 0 after t0) drops amend_first_use
+       by >= .30 while hold_long drops <= .10 (the store is used AND rewritten); zero_slow drops both by >= .30;
+       oracle_gate (open only at t0, amend, amend+1) within .05 of normal; force_open drops hold_long by >= .20.
+  Verdict E (amend54.py report -> report54e.json; per variant stress2 and stress3, paired by seed vs gru and vs cfc,
+    Bonferroni over those 2, two-sided 97.5% paired-t CI, t_.9875,6 = 2.969, margin .10, calls as Amendment A):
+    SHOWN = BETTER (CI low > 0) vs gru AND vs cfc on the primary at lr 3e-3.
+    Otherwise KILL RULE E: "his mechanism not shown on this world", EXCEPT (checked in this order):
+      WORLD AT CEILING (gru and cfc both >= .95 on the primary: not discriminative, no kill);
+      MECHANISM NOT ENGAGED (t>=1 open rate < .03 on test_iid AND closed_after_t0 |drop| <= .01 on amend_first_use in
+      >= 4/7 seeds: no kill, own-bug check + adapt, rule 7). Best lr (by primary and by val amend_long) at a grid edge
+      is flagged (gate 8: extend the grid before a final call). corr(open, amend window) only if >= 20 open events.
+  Seen before this text: data stats and baselines only; no net has been trained on `amend`. The CPU smoke after this
+  text (1 seed, gru/cfc/stress2 [+stress3], short budget) is a learnability check, not evidence.
+AMENDMENT E1 (2026-10-27 17:24 from `date`, after the E CPU smoke, before any GPU run and before any net saw the new
+  splits). CPU smoke, seed 0, lr 3e-3, 2000 steps, 2 threads (smoke_cpu/amend/*.json; not a verdict):
+    test_long amend_first_use: gru 1.0, cfc 1.0, stress3 .986, stress2 0.0 (stress2 never trained: loss 2.12, filler
+    copy .15; open .19). By rule E the world is AT CEILING on its primary (gru, cfc >= .95): not discriminative.
+    stress3 mechanism, seed 0: open at the amend step .92 vs .024 elsewhere (ratio 20, event hit .99); freeze_after_t0
+    amend_first_use .998 -> .016 (iid) while hold_long stays 1.0; zero_slow -> .09/0; oracle_gate .996/1.0;
+    force_open hold_long 1.0 -> .38. (E2/E3 predicted this; one seed, CPU.)
+  Added (amend54.py SPECS, generated AFTER train: every E split incl. train is byte-identical, md5 of repr(sets)
+  57bc5785 before and after): test_xlong (n_amend 1, pre-gap 1-8, D 64-160 after the amend: 4-10x the longest train
+  gap) and test_xhold (no amend, D 64-160). MAX_OUT 91 -> 180 (greedy only; training unchanged). Ablations and gate
+  stats also on test_xlong/test_xhold.
+  VERDICT ORDER (registered now): E decides; ONLY if E is at ceiling (gru and cfc >= .95 on test_long at lr 3e-3, 7
+    seeds) does E1 decide, with the SAME rule on test_xlong amend_first_use (SHOWN = BETTER vs gru AND cfc, t 2.969,
+    margin .10; WORLD AT CEILING / MECHANISM NOT ENGAGED exceptions as E).
+  PREDICTION E1 (GPU, lr 3e-3, 7 seeds, test_xlong amend_first_use mean; confidence ~35%): gru .60 (.20-1.0),
+    cfc .50 (.10-1.0), lstm .65, ltc .40, stress .40, stress2 .10 (training failure seen in the smoke, expected in
+    >= 3/7 seeds at 3e-3), stress3 .80 (.40-1.0; the value must survive in the tau 256/1024 groups: the tau 16/64
+    groups leak it within the gap). test_xhold hold_long: stress3 .85, gru .70, cfc .60. stress3 SHOWN on E1: ~30%.
+  Own-bug fixed during the E smoke (amend54.py, before any GPU run): oracle_gate wrapper reused the previous chunk's
+  input-surprise baseline at t0 (shape error, crashed: no number produced); report's grid-edge flag compared an lr to
+  mean values (would have mis-flagged; no report had been run).
+  Seen AFTER E1 was written (CPU, seed 0, smoke_cpu_e1/; declared so nobody counts them as unseen, not a verdict):
+    test_xlong amend_first_use: gru .904, cfc 1.0, stress2 (lr 1e-3) .628, stress3 .574; test_xhold hold_long: gru .898,
+    cfc 1.0, stress2 .47, stress3 .664. stress2 trains at lr 1e-3 (test_long .984; its lr 3e-3 seed-0 failure is
+    lr-specific, as its weak synth2 seed 0 at 3e-3) but opens at amend only 34% of events (fast half does the rewrite;
+    closed_after_t0 .628 -> .528). stress3 xlong failures are HOLD decay, not missed rewrites: event hit .98, xhold .66;
+    the closed-gate leak 1/tau (tau 16..1024) replaces the tau 16/64 groups within a 64-160 gap.
+
+AMENDMENT F (2026-10-27 17:43 from `date`; ledger #54A, coordinator request after the E/E1 smoke; registered BEFORE any
+  net was trained on world amendk or with arm stress4; seen before this text: amendk data stats + baselines only).
+  arm stress4 (his literal formulation: "T tao grande que o dado fica la e so muda se houver um estresse"): StressCell4
+      = stress3 with tau = infinity when closed: slow group rate = open_g (hard ST gate, as stress3), i.e. closed ->
+      the slow store is copied exactly, open -> full rewrite. Same params as stress3 (147 232 amend; asserted <= 2% of
+      gru and cfc in cmd_run). Rate penalty / t0 mask / input-surprise term / aux loss identical to stress3.
+  world amendk (amendk54.py; K held slots a.. in birth order, K ~ U[4, 6]; `x<s><v>` corrects ONE slot, half of the
+      time to its sign partner = "only one sign changed"; `r<s>` asks one named slot; 0-2 uses of OTHER slots inside
+      each gap (2 in the long tests) so the last value in the stream is not the answer). Splits val / test_iid (train
+      dist, D 1-16), test_long (D 17-32), test_xlong (D 64-160), test_hold (D 1-32), test_xhold (D 64-160),
+      test_multi (4-5 amends), train 20000; random.Random(55). STEPS 2000 (same as amend), batch 48, same schedule.
+      Baselines (same scorer, oracle on non-use items), test_xlong amend_first_use: const .148, never_update 0,
+      recent4/8_else_birth 0, last_seen_any (one-slot memory of a correct stream) .126, oracle 1.0.
+      Escalation (registered now): if the CPU smoke (seed 0, lr 3e-3) gives cfc >= .95 on the primary, world amendk8
+      (K ~ U[6, 8]) is smoked next; the grid tried is reported. Only the world whose smoke has gru AND cfc < .95 on
+      the primary enters q54e.sh.
+  PRIMARY F: test_xlong amend_first_use (D 64-160 after the correction of one of K slots).
+  Verdict F (amendk54.py report -> report54f_<world>.json; per variant stress2/stress3/stress4, paired by seed vs gru
+      and vs cfc, lr 3e-3, 7 seeds, t 2.969, margin .10): SHOWN = BETTER vs gru AND vs cfc on the primary; else
+      WORLD AT CEILING (gru and cfc >= .95), MECHANISM NOT ENGAGED (as E), else NOT SHOWN (kill rule, as E). No
+      fallback metric. On world amend, stress4 is judged by the E/E1 rule as a third variant.
+  PREDICTIONS F (GPU, lr 3e-3, 7 seeds, means; confidence ~35%):
+    F1 stress4 on amend: nothing fades, so test_xlong amend_first_use ~= test_long amend_first_use (|diff| <= .05) and
+       test_xhold hold_long ~= test_hold hold_long (|diff| <= .05); levels .90 (.60-1.0); stress3 drops by >= .25
+       from test_long to test_xlong (the E1 smoke mechanism). freeze_after_t0 == closed_after_t0 for stress4 (both
+       rate 0) on every split (sanity, exact).
+    F2 amendk test_xlong amend_first_use: gru .45 (.15-.85), cfc .55 (.20-.95), lstm .45, ltc .35, stress .35,
+       stress2 .30, stress3 .35, stress4 .75 (.40-1.0). test_xlong hold_after_amend: stress4 .80, gru .45, cfc .55.
+       test_long amend_first_use: gru .80, cfc .85, stress4 .85. stress4 SHOWN on F: ~35%.
+    F3 stress4 mechanism (amendk test_xlong): amend event hit >= .80, elsewhere open <= .10; force_open drops
+       test_xhold hold_long by >= .30; freeze_after_t0 drops amend_first_use to <= .20.
+  The CPU smoke after this text (1 seed, gru/cfc/stress3/stress4) is a learnability / ceiling check, not evidence.
+  Seen AFTER F was written (18:06 from `date`; CPU, seed 0, lr 3e-3, 2 threads; smoke_cpu_f*/; not a verdict):
+    amendk (2000 steps) test_xlong amend_first_use: gru .824, cfc .106, stress3 .626, stress4 .790 -> gru and cfc
+    < .95: amendk enters q54e.sh, amendk8 not needed (grid tried: amendk only). All arms undertrained at 2000 steps
+    (test_iid seq_exact .02-.07; hold_long .18-.50). Learnability: gru at 6000 steps (smoke_cpu_f6k, not the
+    registered budget) test_iid seq_exact .53, test_xlong amend_first_use .952, hold_after_amend .756, hold_long .858.
+    The registered budget stays 2000 steps (equal for every arm); at 6000 steps gru would sit at the ceiling of the
+    primary, so F measures the 2000-step regime.
+    stress4 mechanism on amendk: amend event hit .99, elsewhere open .021; freeze_after_t0 == closed_after_t0 exactly
+    (F1 sanity holds); freeze drops amend_first_use .79 -> .108.
+    stress4 on amend (F1): test_long amend_first_use 1.0, test_xlong .478, test_xhold hold_long .448 -> F1 as stated
+    FAILS on seed 0. Decomposition: on sequences whose filler copies are all right (address healthy) test_xlong
+    amend_first_use is .970 (n 203; stress3 .708, n 404), but stress4's address drifts on long inputs (xlong filler
+    .814, all-filler-ok .406 vs stress3 .993/.808). So the value no longer fades (his claim, conditional), but the
+    exact-hold state derails the address counter; own-bug check pending (rule 7).
+
+AMENDMENT G (2026-10-27 18:24 from `date`; review NO-GO of F; registered BEFORE any net was trained on world amendg;
+  seen before this text: amendg data stats + baselines only). F's world `amendk` and PRIMARY F are SUPERSEDED (B1:
+  the first use after an amend always asked the amended slot, so the slot-blind rule last_x_else_birth scored 1.0 on
+  amend_first_use; F smoke numbers above stay as history, not evidence for G).
+  world amendg (amendk54.py docstring; K ~ U[4, 6]; amendg8 K ~ U[6, 8] = escalation only): every amend segment asks
+      a PAIR (amended slot a, other slot o) in random order (first query = a with p .5, train and test); distractor
+      uses avoid a and the first-asked slot. random.Random(56).
+  PRIMARY G: test_xlong post_amend_all = per amend event, the amended-slot use AND the other-slot use all correct
+      (D 33-64, held-out GAP; lengths inside the train range: train p95 97 items, 0% of post-amend uses beyond it;
+      25% of train sequences carry 4-6 amends for that, review M1). CO-PRIMARY: test_xlong post_amend_all_addr_ok
+      (events whose segment fillers are all right). Reported per arm: post_amend_use/{amended|other},
+      amend_first_use, filler_acc, eos_ok. Length extrapolation is SECONDARY only: test_xxlong / test_xxhold (D
+      64-160, 24% of uses beyond the train max length).
+  Baselines (same scorer), test_xlong post_amend_all: const .002, never_update 0, last_seen_any .014,
+      last_x_else_birth .014 (its amend_first_use 1.0 = the B1 shortcut, other-slot uses .139), recent4/8_else_birth
+      0, oracle 1.0. test_iid: recent8 .336, recent4 .141, last_x .060.
+  BUDGET G (review M2; chosen on VAL only, declared now): gru seed 0 lr 3e-3, CPU, at 2000 and at 4000 steps (two
+      full cosine schedules); a script prints only the val split. STEPS = 4000 if val post_amend_all(4000) -
+      val post_amend_all(2000) >= .05, else 2000. Equal for every arm. 6000+ not probed: per step GPU ~= CPU here
+      (launch-bound decoder), and a 7-seed grid above 4000 steps does not fit the 6 h cap; if 4000 is picked and its
+      val still rises, the plateau is NOT verified (said in the report). CPU smokes after the pick run at STEPS for
+      every arm whose projected CPU wall is < 15 min; an arm that does not fit is smoked at 2000 and labelled so.
+  Verdict G (amendk54.py report -> report54g_<world>.json; per variant stress2/stress3/stress4, paired by seed vs gru
+      and vs cfc, lr 3e-3, 7 seeds, margin .10, FAMILY-WISE t = t_{1-.05/12, 6} = 3.863 over 3 variants x 2 refs
+      (review m2; the same t now also applies to the E/E1 rule on world amend, replacing 2.969: a declared change)):
+      SHOWN = BETTER vs gru AND vs cfc on the primary AND the co-primary not LOSES vs either; else WORLD AT CEILING
+      (gru and cfc >= .95 on the primary), MECHANISM NOT ENGAGED (review m1: hard open rate at t >= the births < .03
+      AND |drop| of closed_after_births <= .01 on the primary, in >= 4/7 seeds), else NOT SHOWN (kill rule, as E).
+  PREDICTIONS G (GPU, lr 3e-3, 7 seeds, means, at STEPS; confidence ~30%):
+    G1 test_xlong post_amend_all: gru .45 (.15-.80), cfc .30 (.05-.70), lstm .45, stress2 .30, stress3 .40,
+       stress4 .55 (.20-.90). post_amend_use/other >= post_amend_use/amended - .10 for every arm (the other slot is
+       older but untouched). test_long post_amend_all >= test_xlong + .10 for gru/cfc/stress3; stress4 within .10.
+    G2 stress4 SHOWN on G: ~25%. stress3 SHOWN: ~10%. stress2: ~5%.
+    G3 mechanism (stress4, test_xlong): open rate at amend items >= .80, elsewhere after births <= .10;
+       closed_after_births drops post_amend_all by >= .30; force_open drops test_xhold hold_long by >= .30.
+    G4 secondary xxlong: every arm drops >= .15 from test_xlong (length extrapolation), stress4 by the most
+       (F smoke: its address counter drifts on long inputs).
+  The CPU smoke after this text (1 seed) is a learnability / ceiling check, not evidence.
+  Seen AFTER G was written (18:38 from `date`; CPU, seed 0, lr 3e-3, 2 threads; not a verdict):
+    BUDGET pick (val only): gru val post_amend_all 2000 steps .097, 4000 steps .111 (gain .013 < .05) -> STEPS 2000.
+    Val use_acc .361/.380, final train loss .257/.233 (both runs stuck on the loss plateau F's gru left between 2000
+    and 4000 steps of a 6000-step schedule). Disclosure: the run's stdout line also printed test seq_exact of the
+    4000 probe (iid .037, xlong .004), seen while reading the val pick.
+    gru smoke at STEPS (= the 2000 probe): test_xlong post_amend_all .014 = the slot-blind baseline last_x_else_birth
+    exactly (amended .724, other .243; filler 1.0, eos 1.0); test_iid post_amend_all .119. gru learned the
+    "last correction" shortcut, not slot binding: the world sits at the FLOOR at 2000 steps. Added after this (a
+    no-kill label only, declared here before any other arm's result was read): WORLD AT FLOOR = gru and cfc means
+    <= best slot-blind baseline + .05 (.064) on the primary -> not discriminative, no kill (checked after CEILING).
+    Report-code fixes (19:01, after ALL seed-0 smokes below were read; found by a synthetic 7-seed dry run of the
+    report, not by any GPU result): (i) a variant BETTER than gru and cfc but itself <= .064 is "NOT SHOWN ... slot-
+    blind floor; no kill" (no SHOWN at the floor); (ii) co-primary undefined (no address-healthy event) counts as 0
+    for a reference arm and as NO VERDICT for the variant, and a variant NO VERDICT on the co-primary blocks SHOWN.
+    Smokes (2000 steps) test_xlong post_amend_all / filler_acc / final loss: gru .014/1.0/.257, lstm .020/1.0/.273,
+    stress2 .036/1.0/.270, stress3 .012/1.0/.308, cfc .000/.111/2.48, stress4 .010/.039/2.45 (cfc and stress4 never
+    left the initial plateau: no address, no eos). Every arm <= the floor: at 2000 steps world amendg is NOT
+    discriminative; the grid as registered is expected to return WORLD AT FLOOR on G (P2 `amend` stays informative).
+
 Usage:
-  liquid13.py parity                                    # BA.Net == this gru arm, bit-exact on CPU
+  liquid13.py parity                                   # BA.Net == this gru arm, bit-exact on CPU
   liquid13.py run --world synth2 --arm cfc --seeds 0,1 --lr 3e-3 --out DIR [--steps N --device cuda --no-e2e]
-  (arms gru cfc ltc lstm stress; synth2 runs also score e2e through the real d32 writer, Amendment B)
+  (arms gru cfc ltc lstm stress stress2; synth2 runs also score e2e through the real d32 writer, Amendment B)
+  liquid13.py report54 --out DIR --ref liquid13/full      # Amendment D: stress2 vs gru/cfc/stress
+  liquid13.py run --world amend --arm stress3 ...; amend54.py baselines|report --out DIR   # Amendment E
+  liquid13.py run --world amendk --arm stress4 ...; amendk54.py baselines|report --world amendk --out DIR   # F
   liquid13.py report --out DIR
 """
 
@@ -186,9 +419,13 @@ import blockaddr as BA  # noqa: E402
 import bridge_cpu as BC  # noqa: E402
 import compose as CP  # noqa: E402
 import multifn as MF  # noqa: E402
+import amend54 as AM  # noqa: E402  (Amendment E world `amend`)
+import amendk54 as AK  # noqa: E402  (Amendment G worlds `amendg`, `amendg8`; F `amendk` superseded)
 
-ARMS = ["gru", "cfc", "ltc", "lstm", "stress"]
+ARMS = ["gru", "cfc", "ltc", "lstm", "stress", "stress2", "stress3", "stress4"]
+AMW = {"amend": AM, **{w: AK for w in AK.CONFIGS}}           # Amendment E/F worlds -> module
 AUX_W = 0.1                 # stress: weight of the next-input prediction loss (stressgate.AUX_W)
+RATE_TARGET, RATE_W = 0.2, 1.0   # stress2: hinge penalty RATE_W * relu(open rate - RATE_TARGET), open rate straight-through
 WORLDS = {"synth2": 1500, "dispatch": 2000, "expr": 2000}       # default steps = the original planner's
 NAMES = {"synth2": ["val", "test_a", "test_num", "len3", "len4", "len5", "len6"],
          "dispatch": ["test_comb", "len4", "len5", "len6", "len7", "len8", "basic", "full"],
@@ -298,6 +535,126 @@ class StressCell(nn.Module):
         return x + (c - x) * rate.repeat_interleave(self.hidden_size // self.g, -1)
 
 
+class StressCell2(nn.Module):
+    """Amendment D (#54A, 10-27): his "banco de T": the slow store HOLDS (leak 1/tau, tau 16..1024) and is rewritten
+    only when a run-time stress signal is high. State = [fast H/2 | slow H/2 in G groups]. Fast units = plain cfc
+    write (rate 1). Slow group g: s += (c_s - s) * (1/tau_g + (1 - 1/tau_g) * open_g), open_g = HARD step
+    1[logit_g > 0] in train and eval (straight-through: backward through sigmoid(logit_g), so a closed gate still
+    gets gradient: the B11 failure mode), logit_g = softplus(w1_g) (surprise - 1) + softplus(w2_g) (log(dis_g + 1e-3)
+    - log .1) + gb_g. Monotone in stress by construction (w >= 0): training can tune sensitivity and threshold,
+    never write on content alone. surprise = -log p_{t-1}(prev symbol) of the planner's own previous prediction
+    (log V at START), dis_g = mean (c_s - s)^2 over group g ("what arrives contradicts what is held"); both detached.
+    No gold at eval: in greedy decoding prev is the planner's own argmax."""
+
+    def __init__(self, dims, H, U, taus=(16, 1024), groups=4):
+        super().__init__()
+        assert H % 2 == 0 and (H // 2) % groups == 0
+        self.hidden_size, self.G, self.Hf = H, groups, H // 2
+        self.heads = Heads(dims, H, U)
+        k = U * len(dims)
+        self.f, self.g_, self.h = nn.Linear(k, H), nn.Linear(k, H), nn.Linear(k, H)
+        self.register_buffer("inv_tau", 1.0 / torch.logspace(math.log10(taus[0]), math.log10(taus[1]), groups))
+        sp1 = math.log(math.e - 1.0)                       # softplus(sp1) = 1
+        self.w1 = nn.Parameter(torch.full((groups,), sp1))
+        self.w2 = nn.Parameter(torch.full((groups,), sp1))
+        self.gb = nn.Parameter(torch.full((groups,), -2.0))   # closed when the input was predicted and agrees
+        self.stat = None                                    # eval diagnostic: [(hard [B,G], soft [B,G], surp [B], dis [B,G])]
+        self.pen = None                                     # train: per-step mean open (straight-through) [B]
+        self.force_open = False                             # eval ablation: slow groups rate 1 (= cfc on all units)
+        self.zero_slow = False                              # eval ablation: slow store zeroed every step
+        self.closed_after_t0 = False                        # eval ablation: only the START write, then hold
+
+    def forward(self, streams, x, surprise, start=None, dt=1.0):
+        b = self.heads(streams, x)
+        gate = torch.sigmoid(-self.f(b) * dt)
+        c = gate * torch.tanh(self.g_(b)) + (1 - gate) * torch.tanh(self.h(b))
+        Hf, G = self.Hf, self.G
+        s, cs = x[:, Hf:], c[:, Hf:]
+        dis = ((cs - s) ** 2).detach().view(x.shape[0], G, -1).mean(-1)                         # [B, G]
+        logit = (F.softplus(self.w1) * (surprise.detach()[:, None] - 1.0)
+                 + F.softplus(self.w2) * (torch.log(dis + 1e-3) - math.log(0.1)) + self.gb)
+        soft = torch.sigmoid(logit)
+        hard = (logit > 0).float()
+        op = hard + soft - soft.detach()                    # straight-through: forward hard, backward sigmoid
+        if self.force_open:
+            op = torch.ones_like(op)
+        if self.closed_after_t0:
+            op = op * start.float()[:, None]
+        rate = self.inv_tau + (1 - self.inv_tau) * op
+        s = s + (cs - s) * rate.repeat_interleave((self.hidden_size - Hf) // G, -1)
+        if self.zero_slow:
+            s = torch.zeros_like(s)
+        if self.pen is not None:
+            self.pen.append(op.mean(-1))
+        if self.stat is not None:
+            self.stat.append((hard.detach(), soft.detach(), surprise.detach(), dis))
+        return torch.cat([c[:, :Hf], s], 1)
+
+
+class StressCell3(StressCell2):
+    """Amendment E (#54A, review M2): stress2 + an INPUT-surprise term, so that a correction arriving in the input can
+    reach the gate at run time without gold. P = Linear(H, 16) predicts R r_t (fixed random projection of the address
+    read, seed 1234 own generator) from x_{t-1}.detach(); mse_t trains only P (aux loss AUX_W, as the stress arm).
+    zin_t = log(mse_t + 1e-3) - log(mean_{k<t} mse_k + 1e-3) (surprise relative to this sequence's own running
+    baseline, causal, detached; 0 at t0). logit_g = stress2 logit + softplus(w3_g) zin_t, w3 init softplus 2.
+    Rate penalty excludes t0 (Planner.forward). stress2 itself is untouched (bit-identity)."""
+
+    NO_LEAK = False
+
+    def __init__(self, dims, H, U, taus=(16, 1024), groups=4, proj=16):
+        super().__init__(dims, H, U, taus, groups)
+        self.pred = nn.Linear(H, proj)
+        gen = torch.Generator().manual_seed(1234)
+        self.register_buffer("R", torch.randn(dims[0], proj, generator=gen) / math.sqrt(dims[0]))
+        self.w3 = nn.Parameter(torch.full((groups,), math.log(math.expm1(2.0))))    # softplus(w3) = 2
+        self.aux = None                                     # train: per-step input-prediction mse [B]
+        self._sum, self._n = None, 0                        # running input-surprise baseline (reset at START)
+
+    def forward(self, streams, x, surprise, start=None, dt=1.0):
+        b = self.heads(streams, x)
+        gate = torch.sigmoid(-self.f(b) * dt)
+        c = gate * torch.tanh(self.g_(b)) + (1 - gate) * torch.tanh(self.h(b))
+        Hf, G = self.Hf, self.G
+        s, cs = x[:, Hf:], c[:, Hf:]
+        dis = ((cs - s) ** 2).detach().view(x.shape[0], G, -1).mean(-1)                         # [B, G]
+        mse = ((self.pred(x.detach()) - streams[0].detach() @ self.R) ** 2).mean(-1)            # [B]
+        if self.aux is not None:
+            self.aux.append(mse)
+        m = mse.detach()
+        if self._sum is None or bool(start.all()):          # t0 reads START in every row: new sequence
+            zin = torch.zeros_like(m)
+            self._sum, self._n = m, 1
+        else:
+            zin = torch.log(m + 1e-3) - torch.log(self._sum / self._n + 1e-3)
+            self._sum, self._n = self._sum + m, self._n + 1
+        logit = (F.softplus(self.w1) * (surprise.detach()[:, None] - 1.0)
+                 + F.softplus(self.w2) * (torch.log(dis + 1e-3) - math.log(0.1)) + self.gb
+                 + F.softplus(self.w3) * zin[:, None])
+        soft = torch.sigmoid(logit)
+        hard = (logit > 0).float()
+        op = hard + soft - soft.detach()
+        if self.force_open:
+            op = torch.ones_like(op)
+        if self.closed_after_t0:
+            op = op * start.float()[:, None]
+        rate = op if self.NO_LEAK else self.inv_tau + (1 - self.inv_tau) * op     # stress4: closed = exact hold
+        s = s + (cs - s) * rate.repeat_interleave((self.hidden_size - Hf) // G, -1)
+        if self.zero_slow:
+            s = torch.zeros_like(s)
+        if self.pen is not None:
+            self.pen.append(op.mean(-1))
+        if self.stat is not None:
+            self.stat.append((hard.detach(), soft.detach(), surprise.detach(), dis, zin))
+        return torch.cat([c[:, :Hf], s], 1)
+
+
+class StressCell4(StressCell3):
+    """Amendment F (#54A literal: "T tao grande que o dado fica la e so muda se houver um estresse"): stress3 with
+    tau = infinity when closed. Slow group g: s += (c_s - s) * open_g (closed -> rate exactly 0, nothing fades; open ->
+    full rewrite as stress3). Same parameters as stress3 (inv_tau buffer kept, unused)."""
+    NO_LEAK = True
+
+
 class Planner(BA.Net):
     """blockaddr.Net with a swappable decoder cell; encoder/reader/heads identical (same init order)."""
 
@@ -314,7 +671,8 @@ class Planner(BA.Net):
             self.out, self.adv = nn.Linear(H, len(BA.SYM)), nn.Linear(H, 1)
         else:
             H = 2 * d
-            self.cell = {"cfc": CfCCell, "ltc": LTCCell, "stress": StressCell}[arm]([d, d], H, size)
+            self.cell = {"cfc": CfCCell, "ltc": LTCCell, "stress": StressCell, "stress2": StressCell2,
+                         "stress3": StressCell3, "stress4": StressCell4}[arm]([d, d], H, size)
         self.aux_loss = None
 
     @property
@@ -332,6 +690,13 @@ class Planner(BA.Net):
         elif self.kind == "lstm":
             st = self.cell(torch.cat([r, y], 1), st)
             o = st[0]
+        elif self.kind in ("stress2", "stress3", "stress4"):   # surprise of prev under the previous prediction
+            with torch.no_grad():
+                V = self.out.out_features
+                sp = -F.log_softmax(self.out(st), -1).gather(1, prev.clamp(max=V - 1)[:, None])[:, 0]
+                sp = torch.where(prev >= V, torch.full_like(sp, math.log(V)), sp)     # START: nothing predicted yet
+            st = self.cell([r, y], st, sp, prev >= self.out.out_features)
+            o = st
         else:
             st = self.cell([r, y], st)
             o = st
@@ -349,6 +714,10 @@ class Planner(BA.Net):
         c, st, outs = torch.zeros(B, device=self.dev), self.init_state(B), []
         if self.kind == "stress":
             self.cell.aux = []
+        if self.kind == "stress2":
+            self.cell.pen = []
+        if self.kind in ("stress3", "stress4"):
+            self.cell.pen, self.cell.aux = [], []
         for t in range(y_in.shape[1]):
             lo, p, st = self.step(h, a, m, c, y_in[:, t], st)
             outs.append(lo)
@@ -357,6 +726,21 @@ class Planner(BA.Net):
             mk = (y_in != 0).float()                           # real decoder inputs (START or a symbol), not pad
             self.aux_loss = (torch.stack(self.cell.aux, 1) * mk).sum() / mk.sum()
             self.cell.aux = None
+        if self.kind == "stress2":
+            mk = (y_in != 0).float()
+            op = (torch.stack(self.cell.pen, 1) * mk).sum() / mk.sum()        # slow open rate, straight-through
+            self.open_rate = op.item()
+            self.aux_loss = RATE_W * F.relu(op - RATE_TARGET)
+            self.cell.pen = None
+        if self.kind in ("stress3", "stress4"):                # Amendment E: t0 excluded from the rate penalty
+            mk = (y_in != 0).float()
+            mk0 = mk.clone()
+            mk0[:, 0] = 0
+            op = (torch.stack(self.cell.pen, 1) * mk0).sum() / mk0.sum().clamp(min=1)
+            pm = (torch.stack(self.cell.aux, 1) * mk).sum() / mk.sum()
+            self.open_rate = op.item()
+            self.aux_loss = RATE_W * F.relu(op - RATE_TARGET) + AUX_W * pm
+            self.cell.pen = self.cell.aux = None
         return torch.stack(outs, 1)
 
     @torch.no_grad()
@@ -404,6 +788,14 @@ class OracleWriter:
 
 def setup_world(world):
     """-> (data, name_bytes, targets, train list). Sets BA.SYM/START/MAX_OUT exactly as the original path."""
+    if world == "amend":                            # Amendment E (#54A): held fact + mid-sequence corrections
+        data = AM.Data()
+        BA.SYM, BA.START, BA.MAX_OUT = AM.SYM, AM.START, data.max_out
+        return data, AM.name_bytes, AM.targets
+    if world in AK.CONFIGS:                         # Amendment F: K held slots, one-slot corrections
+        data = AK.Data(world)
+        BA.SYM, BA.START, BA.MAX_OUT = AK.SYM, AK.START, data.max_out
+        return data, AK.name_bytes, AK.targets
     if world == "synth2":
         BA.SYM, BA.START, BA.MAX_OUT = BC.SYM, len(BC.SYM), BC.MAX_OUT
         data = BC.Data()
@@ -423,8 +815,9 @@ def train(world, arm, size, data, nb, tg, seed, steps, lr, dev, log=None):
     """the loop of blockaddr.main / multifn.train_planner / compose.train_planner (identical among them)."""
     torch.manual_seed(seed)
     net = Planner(arm, size).to(dev)
-    if arm == "stress":                                    # gate scalars without weight decay (stressgate wg)
-        nd = {"cell.a", "cell.b"}
+    if arm in ("stress", "stress2", "stress3", "stress4"):  # gate scalars without weight decay (stressgate wg)
+        nd = ({"cell.a", "cell.b"} if arm == "stress" else {"cell.w1", "cell.w2", "cell.gb"}
+              | ({"cell.w3"} if arm in ("stress3", "stress4") else set()))
         opt = torch.optim.AdamW([{"params": [p for n, p in net.named_parameters() if n not in nd]},
                                  {"params": [p for n, p in net.named_parameters() if n in nd], "weight_decay": 0.0}],
                                 lr=lr, weight_decay=0.01)
@@ -441,18 +834,23 @@ def train(world, arm, size, data, nb, tg, seed, steps, lr, dev, log=None):
         if arm == "stress":
             auxs.append(net.aux_loss.item())
             loss = loss + AUX_W * net.aux_loss
+        elif arm in ("stress2", "stress3", "stress4"):
+            auxs.append(net.open_rate)
+            loss = loss + net.aux_loss
         opt.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0)
         opt.step()
         if (s + 1) % 250 == 0 and log:
             log({"step": s + 1, "loss": round(sum(losses[-100:]) / 100, 4),
-                 **({"aux": round(sum(auxs[-100:]) / 100, 4)} if auxs else {})})
+                 **({("open" if arm in ("stress2", "stress3", "stress4") else "aux"): round(sum(auxs[-100:]) / 100, 4)} if auxs else {})})
     net.aux_last100 = round(sum(auxs[-100:]) / 100, 5) if auxs else None
     return net, losses
 
 
 def evaluate(world, net, data):
+    if world in AMW:
+        return AMW[world].evaluate(net, data)
     if world == "synth2":
         return BA.evaluate(net, data, NAMES[world])
     ev = (MF if world == "dispatch" else CP).evaluate(net, OracleWriter(), data, NAMES[world])
@@ -462,11 +860,15 @@ def evaluate(world, net, data):
 @torch.no_grad()
 def saturation(world, net, data, nb):
     """liquid gate / keep statistics on the longest held-out split (greedy pass)."""
-    if net.kind not in ("cfc", "ltc", "stress"):
+    if world in AMW:                                         # Amendment E/F instruments (stress2/3/4; else None)
+        return AMW[world].cell_stats(net, data)
+    if net.kind not in ("cfc", "ltc", "stress", "stress2", "stress3", "stress4"):
         return None
     k = {"synth2": "len6", "dispatch": "len8", "expr": "calls8"}[world]
     if net.kind == "stress":
         return stress_stats(world, net, data, nb, k)
+    if net.kind in ("stress2", "stress3", "stress4"):
+        return stress2_stats(world, net, data, nb, k)
     net.cell.stat = []
     net.greedy(nb(data.sets[k][:256]))
     v = torch.cat([s.flatten() for s in net.cell.stat]).float().cpu()
@@ -516,6 +918,77 @@ def stress_stats(world, net, data, nb, k):
             "z_mean": round(z.mean().item(), 3),
             "z_quantiles_10_50_90": [round(x, 3) for x in torch.quantile(z, torch.tensor([.1, .5, .9])).tolist()],
             "a": [round(v, 3) for v in net.cell.a.tolist()], "b": [round(v, 3) for v in net.cell.b.tolist()]}
+
+
+def _corr(a, b):
+    """Pearson (phi for 0/1) correlation of two flat float tensors; None if either is constant."""
+    a, b = a.float() - a.float().mean(), b.float() - b.float().mean()
+    d = (a.pow(2).sum() * b.pow(2).sum()).sqrt().item()
+    return round((a * b).sum().item() / d, 4) if d > 0 else None
+
+
+@torch.no_grad()
+def stress2_stats(world, net, data, nb, k):
+    """Amendment D instruments: hard open rate of the slow groups over all greedy steps and before the first <eos>;
+    correlation of the per-step open fraction with stress proxies (scored with gold AFTER decoding, never fed to the
+    net); ablations zero_slow / force_open on len3..len6 (synth2) or split k."""
+    cell = net.cell
+    tasks = data.sets[k][:256]
+    cell.stat = []
+    gen = net.greedy(nb(tasks))                                              # [B, T] cpu
+    hard = torch.stack([q[0] for q in cell.stat], 1).float().cpu()          # [B, T, G]
+    soft = torch.stack([q[1] for q in cell.stat], 1).float().cpu()
+    surp = torch.stack([q[2] for q in cell.stat], 1).float().cpu()          # [B, T]
+    dis = torch.stack([q[3] for q in cell.stat], 1).float().cpu()           # [B, T, G]
+    cell.stat = None
+    eos = BA.SYM.index("<eos>")
+    alive = ~(torch.cumsum((gen == eos).long(), 1) - (gen == eos).long() > 0)    # up to and incl. first eos
+    of = hard.mean(-1)                                                       # open fraction of slow groups per step
+    out = {"what": "stress2 slow-group hard open rate (tau 16..1024 bank)", "split": k,
+           "slow_rate_all": round(hard.mean().item(), 4), "slow_rate_pre_eos": round(of[alive].mean().item(), 4),
+           "slow_rate_pre_eos_per_group": [round(v, 4) for v in hard[alive].mean(0).tolist()],
+           "soft_mean_pre_eos": round(soft[alive].mean().item(), 4),
+           "open_at_t0": round(of[:, 0].mean().item(), 4),
+           "slow_rate_pre_eos_t>=1": round(of[:, 1:][alive[:, 1:]].mean().item(), 4),
+           "surprise_q10_50_90_pre_eos": [round(v, 3) for v in torch.quantile(surp[alive], torch.tensor([.1, .5, .9])).tolist()],
+           "dis_mean_pre_eos": round(dis[alive].mean().item(), 4),
+           "w1": [round(v, 3) for v in F.softplus(cell.w1).tolist()], "w2": [round(v, 3) for v in F.softplus(cell.w2).tolist()],
+           "gb": [round(v, 3) for v in cell.gb.tolist()]}
+    if world == "synth2":                                                    # stress proxies from gold, post hoc
+        _, y = BA.targets(tasks)
+        T = gen.shape[1]
+        gold = torch.zeros(len(tasks), T, dtype=torch.long)
+        gold[:, :min(T, y.shape[1])] = y[:, :T]
+        wrong = (gen != gold)
+        first = wrong & (torch.cumsum(wrong.long(), 1) == 1)                 # the first wrong token of the plan
+        wrong_prev = torch.cat([torch.zeros(len(tasks), 1, dtype=torch.bool), wrong[:, :-1]], 1)
+        bstart = torch.tensor([[BA.SYM[j].startswith(("op:", "fin:")) for j in row] for row in gen.tolist()])
+        bstart_prev = torch.cat([torch.zeros(len(tasks), 1, dtype=torch.bool), bstart[:, :-1]], 1)
+        m = alive.clone()
+        m[:, 0] = False                                                      # t0 always reads START: excluded
+        o = of[m]
+        px = {"wrong_now": wrong, "wrong_prev": wrong_prev, "first_wrong_now": first,
+              "block_start_now": bstart, "block_start_prev": bstart_prev}
+        out["proxy_t>=1_pre_eos"] = {
+            n: {"corr": _corr(o, v[m]), "frac": round(v[m].float().mean().item(), 4),
+                "p_open_if": round(o[v[m]].mean().item(), 4) if v[m].any() else None,
+                "p_open_if_not": round(o[~v[m]].mean().item(), 4) if (~v[m]).any() else None}
+            for n, v in px.items()}
+        out["corr_open_surprise"] = _corr(o, surp[m])
+    abl = {}
+    for sp in (["len3", "len4", "len5", "len6"] if world == "synth2" else [k]):
+        row = {}
+        for mode in ("normal", "zero_slow", "force_open", "closed_after_t0"):
+            cell.zero_slow, cell.force_open, cell.closed_after_t0 = (mode == "zero_slow", mode == "force_open",
+                                                                     mode == "closed_after_t0")
+            try:
+                row[mode] = split_plan_exact(world, net, data, sp)
+            finally:
+                cell.zero_slow = cell.force_open = cell.closed_after_t0 = False
+        abl[sp] = row
+    out["ablation_plan_exact"] = abl
+    net.eval()
+    return out
 
 
 # ------------------------------------------------------------------------------------------------- e2e (synth2)
@@ -569,7 +1042,11 @@ def cmd_run(a):
         nc = n_params(Planner("cfc", matched("cfc", target)))
         ns = n_params(Planner("stress", size))
         assert abs(ns - nc) <= 0.05 * nc, (ns, nc)
-    steps = a.steps or WORLDS[a.world]
+    if a.arm in ("stress2", "stress3", "stress4"):         # Amendment D/E/F: within 2% of gru AND of cfc
+        nc = n_params(Planner("cfc", matched("cfc", target)))
+        ns = n_params(Planner(a.arm, size))
+        assert abs(ns - target) <= 0.02 * target and abs(ns - nc) <= 0.02 * nc, (ns, target, nc)
+    steps = a.steps or (AMW[a.world].STEPS if a.world in AMW else WORLDS[a.world])
     out = os.path.join(a.out, a.world)
     os.makedirs(out, exist_ok=True)
     tables = writer_tables(a.out, data) if a.world == "synth2" and not a.no_e2e else None
@@ -591,7 +1068,7 @@ def cmd_run(a):
                "final_loss": round(sum(losses[-100:]) / 100, 5), "eval": ev, "sat": saturation(a.world, net, data, nb),
                "max_vram_mb": round(torch.cuda.max_memory_allocated() / 2 ** 20, 1) if dev.type == "cuda" else None}
         if net.aux_last100 is not None:
-            res["aux_mse_last100"] = net.aux_last100
+            res["open_rate_last100" if a.arm in ("stress2", "stress3", "stress4") else "aux_mse_last100"] = net.aux_last100
         if tables is not None:
             t1 = time.perf_counter()
             res["e2e"] = e2e(net, data, tables)
@@ -791,6 +1268,64 @@ def mechanism_b(rs):
     return {"per_seed": per, "n_prereg_gate_met": n_met, "n_collapsed": n_col}
 
 
+def cmd_report54(a):
+    """Amendment D: stress2 (runs in --out/synth2) vs gru / cfc / stress (runs in --ref/synth2), synth2, per lr,
+    paired by seed, Bonferroni over the 3 comparisons per lr (t_.99167,6 = 3.287). Primary = plan_exact len6."""
+    import statistics as st
+    rows = {}
+    for root, arms in ((a.out, ("stress2",)), (a.ref, ("gru", "cfc", "stress"))):
+        d = os.path.join(root, "synth2")
+        for fn in sorted(os.listdir(d)) if os.path.isdir(d) else []:
+            if fn.endswith(".json"):
+                r = json.load(open(os.path.join(d, fn)))
+                if r["arm"] in arms:
+                    rows.setdefault((r["arm"], r["lr"]), {})[r["seed"]] = r
+    pe = lambda r, k: r["eval"][k]["block_exact"]
+    rep = {"what": "Amendment D (#54A stress2), synth2, plan_exact = block_exact", "out": a.out, "ref": a.ref}
+    for lr in sorted({l for (_, l) in rows}):
+        row = {}
+        for arm in ("stress2", "gru", "cfc", "stress"):
+            rs = rows.get((arm, lr), {})
+            if rs:
+                row[arm] = {k: {"mean": round(st.mean(v), 4), "sd": round(st.stdev(v), 4) if len(v) > 1 else None,
+                                "min": min(v), "n": len(v)}
+                            for k in ("len3", "len4", "len5", "len6") for v in [[pe(rs[s], k) for s in sorted(rs)]]}
+        x = rows.get(("stress2", lr), {})
+        for ref in ("gru", "cfc", "stress"):
+            g = rows.get((ref, lr), {})
+            if len(x) == 7 and sorted(x) == sorted(g):
+                row[f"vs_{ref}/plan_exact_len6"] = paired_call({s: pe(x[s], "len6") for s in x},
+                                                               {s: pe(g[s], "len6") for s in g}, 3.287, 0.10)
+            else:
+                row[f"vs_{ref}/plan_exact_len6"] = {"call": f"NO VERDICT: seeds {sorted(x)} vs {ref} {sorted(g)}"}
+        mech = {}
+        for sd in sorted(x):
+            m = x[sd].get("sat") or {}
+            ab = m.get("ablation_plan_exact", {})
+            drop = {mode: {"short_len3_4": round(st.mean(ab[k]["normal"] - ab[k][mode] for k in ("len3", "len4")), 4),
+                           "long_len5_6": round(st.mean(ab[k]["normal"] - ab[k][mode] for k in ("len5", "len6")), 4)}
+                    for mode in ("zero_slow", "closed_after_t0", "force_open") if ab and mode in ab["len3"]}
+            mech[sd] = {"slow_rate_all": m.get("slow_rate_all"), "slow_rate_pre_eos": m.get("slow_rate_pre_eos"),
+                        "slow_rate_pre_eos_t>=1": m.get("slow_rate_pre_eos_t>=1"),
+                        "corr_open_wrong_prev": m.get("proxy_t>=1_pre_eos", {}).get("wrong_prev", {}).get("corr"),
+                        "corr_open_block_start_now": m.get("proxy_t>=1_pre_eos", {}).get("block_start_now", {}).get("corr"),
+                        "drop": drop}
+        if mech:
+            v = [m["slow_rate_pre_eos"] for m in mech.values() if m["slow_rate_pre_eos"] is not None]
+            row["mechanism"] = {"per_seed": mech, "slow_rate_pre_eos_max": max(v) if v else None,
+                                "n_long_drop_gt_short_zero_slow": sum(
+                                    m["drop"]["zero_slow"]["long_len5_6"] > m["drop"]["zero_slow"]["short_len3_4"]
+                                    for m in mech.values() if "zero_slow" in m["drop"]),
+                                "n_closed_after_t0_no_effect": sum(
+                                    max(map(abs, m["drop"]["closed_after_t0"].values())) <= .01
+                                    for m in mech.values() if "closed_after_t0" in m["drop"])}
+        rep[f"lr{lr:g}"] = row
+    json.dump(rep, open(os.path.join(a.out, "report54.json"), "w"), indent=1)
+    print(json.dumps({k: ({a_: v[a_]["len6"] for a_ in ("stress2", "gru", "cfc", "stress") if a_ in v}
+                          | {c: v[c]["call"] for c in v if c.startswith("vs_")}) if k.startswith("lr") else v
+                      for k, v in rep.items()}, indent=1))
+
+
 def cmd_baselines(a):
     """gate 1: constant plan (most common train plan) and '<eos>' only, graded by the same path."""
     out = {}
@@ -826,7 +1361,7 @@ def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("run")
-    p.add_argument("--world", required=True, choices=list(WORLDS))
+    p.add_argument("--world", required=True, choices=list(WORLDS) + list(AMW))
     p.add_argument("--arm", required=True, choices=ARMS)
     p.add_argument("--seeds", default="0")
     p.add_argument("--lr", type=float, default=3e-3)
@@ -840,10 +1375,14 @@ def main():
     p.add_argument("--threads", type=int, default=2)
     p = sub.add_parser("report")
     p.add_argument("--out", required=True)
+    p = sub.add_parser("report54")
+    p.add_argument("--out", required=True)
+    p.add_argument("--ref", required=True, help="dir with the gru/cfc/stress synth2 runs (liquid13/full)")
     p = sub.add_parser("baselines")
     p.add_argument("--out", required=True)
     a = ap.parse_args()
-    {"run": cmd_run, "parity": cmd_parity, "report": cmd_report, "baselines": cmd_baselines}[a.cmd](a)
+    {"run": cmd_run, "parity": cmd_parity, "report": cmd_report, "report54": cmd_report54,
+     "baselines": cmd_baselines}[a.cmd](a)
 
 
 if __name__ == "__main__":

@@ -361,3 +361,62 @@ Corpus index alone as generator (contexts capped at 8/16/32/48 bytes): parse 3.1
   - #46 saci-code: step 2 measured (monitor fires on 106 failures and 44–45 passes); step 4 (rewind/resample/vote at the
     fire point, `synth/saci_redo.py`) built, under Opus review, GPU queued after mix3.
   - Agent rule from 10-26: code agents (review, writing, analysis) run on Opus only; Sonnet only for JSON/simple data.
+- **10-26 (evening 2): #48 re-review of Sonnet-era work, pre-registered verdicts, runs queued.**
+  - #48 (8 Opus groups, every claim re-checked by me before it went into the ledger):
+    - Grader v1 compares `repr` text, so `2.0` vs `2` fails. 4 of the 152 s5 "failures" are correct programs.
+    - Every bwrap runner leaked the environment (74 vars). Fixed with `--clearenv` plus rlimits.
+    - `addr2d` (his row+column address, #12) had never been trained: its log is one info line.
+    - The synth judge grades the final output only. A skip-a-line policy scores 24.5% test_b, which is the ctrl3
+      "25.7" baseline, so treat that number as the shortcut floor.
+  - Grader v2 is built and CPU-tested but opt-in (`PYCODE_GRADER=v2`):
+    - It compares by value and adds float probes.
+    - It flags constant golds and checks the exact op set for dispatch.
+    - On s5 it gives .7437 → .7504: 4 flips, all maxx ties.
+    - It is applied after the #46 run, which is registered on v1.
+  - #26 v2.1/v3.2 had an Opus pre-run review: NOT RUN, 3 defects.
+    - Free start checks gave the stop arms up to 56 extra near-guess samples.
+    - The ES stall counted windows with no accepted step.
+    - Rand got the reference arm's realized budget.
+    - v2.2/v3.3 fix all three.
+    - The second review (GO) fixed the verdict script before any result: B uses 47 units, not 46; curves are part
+      of Q3/Q4; Q5 has a strict Adam-only HARM test.
+    - `synth/gradsearch_verdict.py` is the pre-registered judge. Test runs started at 20:44 (CPU, problem seed 18, n 80
+      per length).
+  - #3 mix4b (corpus mirror as product of experts, `mix_eval.py`, 4 seeds × 128): registered term_parses_novel
+    NOT ESTABLISHED (+3.5 / +2.3 / +1.8 pp, CIs cross 0).
+    - The linear mixer lin24t loses again (−5.3).
+    - Post hoc: `runs` rises +4..+7 pp for every poe arm. That gain sits on seed 0 (per seed +16.4 / +1.6 / +4.7 /
+      +2.3) and in one-statement functions (runs 47 → 77 there, 18 → 20 among functions with ≥ 2 statements).
+    - A confirmatory run on fresh seeds 4–15 with `runs` as the primary metric is registered in `mix5_verdict.py`
+      and queued. Its first design used 4 seeds and could not settle (Opus NO-GO). The registered secondary is
+      `runs` on functions with ≥ 2 statements.
+  - #12 old queue `q12.sh` was killed after an Opus NO-GO. Its prediction mechanism was wrong (row−1 equals the block
+    tag on 79% of body bytes), addrctl was paired with the wrong arm, and it used the wrong bytes reference. The new
+    registration is in the header of `$R/q_after47b.sh`: P1 addr2d − bytes ≥ +10 pp on test_a and test_num, both
+    seeds.
+  - GPU queue: #46 redo full (`saci_code/q47.sh`) → mix5 → #12 units (addr2d s0/s1, addrseg s1, addrrk s1, addrctl
+    s1/s0, ~12 h).
+- **10-26 (night): verdicts in for #26 gradsearch v2.2 and #46 saci-code redo.**
+  - #26 gradsearch v2.2 (`synth/gradsearch_verdict.py`, CPU, n 80 per length; solved = fits 8 examples AND equals the
+    true program on 32 hidden inputs within budget B):
+    - guess_derive solves .875 / .725 / .65 at len 2 / 3 / 4; the guess alone .54 / .36 / .26; derive with no guess
+      .50 / .19 / .14; random programs .68 / .48 / .35.
+    - Q2 PASS: the derivative adds +34..+39 pp over the guess alone.
+    - Q3 PASS "sampling wins": sampling near the guess (.89 / .80 / .80) beats deriving from it, 33 vs 14 discordant
+      pairs, p .008. The gap grows with length.
+    - Q4 PASS: random programs beat derive-without-guess (66 vs 12). Deriving needs a good start.
+    - Q5, his stop rule (stop when |dloss| ~ 0): no harm; not established with the guess (4 vs 0, p .125); helps from
+      a bad start (derive_only_stop 8 vs 0, p .0078, reported outside the rule verdict).
+  - #46 saci-code redo full (`synth/saci_redo.py`, 593 requests, 150 fired by the understander's entropy monitor, 106
+    of them real failures; graded v1 and re-graded v2 with identical nets):
+    - Registered P1-P5 all PASS, KILL not triggered. Best arm rewind8_k: 441 → 459 passes (+18 net, 20 fixes / 2
+      breaks, p .0001). Vote over k samples: +14 with 0 breaks.
+    - What does the work is WHICH request is retried: resampling the fired requests gives +13, the same number of random
+      requests +1 (p .004), resampling all 593 +12 (4x the compute).
+    - WHERE to rewind is not shown to matter: a random rewind point gives +12 vs +16 / +18 (p .15-.29).
+    - Taking the second-best token at the fire point hurts (−23).
+    - Ceiling: only 19-23 of the 106 fired failures have any passing candidate among k = 8.
+  - Grader v2 applied to `e2e_pipeline.py` (opt-in). D1 (compare by value) applied inside the multifn and compose
+    runners. Old pass rates there are lower bounds.
+  - Running: mix5 (#3 confirmatory, GPU, 12 seeds), then #12 address arms (~12 h). gradconst v3.3 (#26) caps tune on
+    CPU; main runs (n 200, both stall modes) follow a review of `synth/gradconst33_verdict.py`.

@@ -551,9 +551,23 @@ def smoke(a, unit, split):
     train(a, unit, split)
 
 
+def eval_ckpt(a, unit, split):
+    """gate 5 positive control: reload a saved checkpoint and re-score the judged splits. evaluate() draws from its own
+    generator (seed 1) and its own task shuffle, so the numbers must equal the run's last logged row."""
+    shape, addr = SHAPE[a.unit], a.unit.startswith("addr")
+    ck = torch.load(a.ckpt, map_location="cuda")
+    net = (AddrGPT(unit.vocab, 256, 4, 4, shape["ctx"], a.unit) if addr else UnitGPT(unit.vocab, 256, 4, 4, shape["ctx"])).cuda()
+    net.load_state_dict(ck["model"])
+    out = {"ckpt": a.ckpt, "step": ck["step"]}
+    for sp in ("test_a", "test_num"):
+        out[sp] = {"pass@1": evaluate(net, unit, split[sp], shape, a.n, a.k)["pass@1"],
+                   "greedy_pass@1": evaluate(net, unit, split[sp], shape, a.n, 1, temp=0)["pass@1"]}
+    print(json.dumps({"eval_ckpt": out}), flush=True)
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["smoke", "train"])
+    ap.add_argument("cmd", choices=["smoke", "train", "evalckpt"])
     ap.add_argument("--unit", required=True, choices=list(SHAPE))
     ap.add_argument("--out-dir")
     ap.add_argument("--steps", type=int, default=3000)
@@ -562,12 +576,13 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--mem-frac", type=float, default=0.5)
     ap.add_argument("--quant", default="none", choices=["none", "bin", "ter", "q2"])
+    ap.add_argument("--ckpt", help="evalckpt: checkpoint to re-score")
     a = ap.parse_args()
     torch.cuda.set_per_process_memory_fraction(a.mem_frac)
     split = json.load(open(f"{synth2.D}/splits.json"))
     split["test_len4"] = len4_split(split)
     unit = make_unit(a.unit, split)
-    (smoke if a.cmd == "smoke" else train)(a, unit, split)
+    {"smoke": smoke, "train": train, "evalckpt": eval_ckpt}[a.cmd](a, unit, split)
 
 
 if __name__ == "__main__":

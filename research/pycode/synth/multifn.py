@@ -105,6 +105,16 @@ def spec_name(spec):
 
 RUNNER = r"""
 import json, sys
+def _canon(v):
+    if isinstance(v, float):
+        v = round(v, 6)
+        if v == 0:
+            v = 0.0
+        if v.is_integer() and abs(v) < 2 ** 53:
+            v = int(v)
+    elif isinstance(v, (list, tuple)):
+        return type(v).__name__[0] + "[" + ",".join(_canon(x) for x in v) + "]"
+    return repr(v)
 items, cases = json.load(sys.stdin)
 res = []
 for src, ops in items:
@@ -116,7 +126,7 @@ for src, ops in items:
             for a, b in cases:
                 try:
                     v = g["main"](o, a, b)
-                    row.append(repr(round(v, 6) if isinstance(v, float) else v))
+                    row.append(_canon(v))
                 except Exception as e:
                     row.append("!" + type(e).__name__)
         res.append(row)

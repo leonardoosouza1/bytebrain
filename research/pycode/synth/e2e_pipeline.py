@@ -166,6 +166,24 @@ for src, calls in items:
     sys.stdout = io.StringIO()
 real.write(json.dumps(res))
 """
+# grader v2 (#48 g4/g6 D1-D4), opt-in: PYCODE_GRADER=v2. v1 stays the default for runs registered on it.
+GRADER_V2 = os.environ.get("PYCODE_GRADER") == "v2"
+_CANON = """def _canon(v):
+    if isinstance(v, float):
+        v = round(v, 6)
+        if v == 0:
+            v = 0.0
+        if v.is_integer() and abs(v) < 2 ** 53:
+            v = int(v)
+    elif isinstance(v, (list, tuple)):
+        return type(v).__name__[0] + "[" + ",".join(_canon(x) for x in v) + "]"
+    return repr(v)
+"""
+_OLD_REPR = "repr(round(v, 6) if isinstance(v, float) else v)"
+assert RUNNER.count(_OLD_REPR) == 1 and RUNNER.startswith("\nimport ")
+_i = RUNNER.index("\n", 1) + 1
+RUNNER_V2 = RUNNER[:_i] + _CANON + RUNNER[_i:].replace(_OLD_REPR, "_canon(v)")   # D1: 2.0 == 2, -0.0 == 0
+FCASES = [(0.5, 1.5), (-2.5, 3.25), (7.5, -0.5), (2.25, 2.25), (-0.75, -1.25)]  # D2: breaks integer coincidences
 
 
 def run_many(items):
@@ -173,7 +191,7 @@ def run_many(items):
     cmd = ["bwrap", "--unshare-all", "--die-with-parent", "--new-session", "--clearenv", "--setenv", "PATH", "/usr/bin",
            "--ro-bind", "/usr", "/usr", "--symlink", "usr/lib", "/lib", "--symlink", "usr/lib64", "/lib64",
            "--symlink", "usr/bin", "/bin", "--proc", "/proc", "--dev", "/dev",
-           "/usr/bin/python3", "-I", "-S", "-c", RUNNER]     # --clearenv: review #48 g4 S1 (parent env held a token)
+           "/usr/bin/python3", "-I", "-S", "-c", RUNNER_V2 if GRADER_V2 else RUNNER]     # --clearenv: review #48 g4 S1 (parent env held a token)
     n_calls = sum(len(c) for _, c in items)
     try:
         p = subprocess.run(cmd, input=json.dumps(items), capture_output=True, text=True,
@@ -197,6 +215,8 @@ def calls_for(key):
         return [("main", [o, a, b]) for a, b in CASES]
     if kind == "x":
         return [("main", [a, b]) for a, b in CASES]
+    if kind == "xf":
+        return [("main", [a, b]) for a, b in FCASES]
     if kind == "f":
         return [(o, [a, b]) for a, b in CASES]
     if kind == "jd":
@@ -241,13 +261,14 @@ _REF = {}
 
 def ref_all():
     """gold outputs: d:<op> through main, f:<op> per function (computed once)."""
-    if not _REF:
+    ref = _REF.setdefault(GRADER_V2, {})
+    if not ref:
         b = Batch()
         h = b.add(REF_ALL_SRC, [f"d:{o}" for o in OPS] + [f"f:{o}" for o in OPS])
-        _REF.update(b.run()[h])
-        assert all(v is not None and not any(x.startswith("!") for x in v) for v in _REF.values()), \
+        ref.update(b.run()[h])
+        assert all(v is not None and not any(x.startswith("!") for x in v) for v in ref.values()), \
             "sandbox failed: reference outputs missing"
-    return _REF
+    return ref
 
 # ----------------------------------------------------------------------------------------------- spec -> bridge
 
@@ -856,15 +877,16 @@ def run_belt(reqs, raws, planner, writer, injects=None, overrides=None, lat_u=No
     for i, q in enumerate(reqs):
         b, gb, plan = bridged[i], gold_b[i], plans[i]
         pw = b[0] if b else q["world"]
-        kg = [f"d:{o}" for o in q["caps"]] if q["world"] == "dispatch" else ["x:"]
-        ks = ([f"d:{o}" for o in b[1]] if b[0] == "dispatch" else ["x:"]) if b else []
+        xk = ["x:", "xf:"] if GRADER_V2 else ["x:"]
+        kg = [f"d:{o}" for o in q["caps"]] if q["world"] == "dispatch" else xk
+        ks = ([f"d:{o}" for o in b[1]] if b[0] == "dispatch" else xk) if b else []
         src = assemble(pw, plan, wt[i])
         disp_ops = re.findall(r'op == "(\w+)"', src)
         kj = ([f"jd:{o}" for o in dict.fromkeys(list(b[1] if b and b[0] == "dispatch" else []) + disp_ops)]
               if pw == "dispatch" else ["jx:"])
-        h = {"E": B.add(src, kg + ks + kj), "src": src, "kg": kg, "ks": ks, "kj": kj, "pw": pw}
+        h = {"E": B.add(src, kg + ks + kj), "src": src, "kg": kg, "ks": ks, "kj": kj, "pw": pw, "disp": disp_ops}
         if q["world"] == "expr":
-            h["G"] = B.add(assemble("expr", oracle_plan(gb), MF.block_text), ["x:"])
+            h["G"] = B.add(assemble("expr", oracle_plan(gb), MF.block_text), xk)
         if b:
             h["REF_S"] = B.add(assemble(pw, oracle_plan(b), MF.block_text), kg + ks)
             h["CF_W"] = B.add(assemble(pw, plan, MF.block_text), kg + ks)
@@ -894,8 +916,10 @@ def run_belt(reqs, raws, planner, writer, injects=None, overrides=None, lat_u=No
 
         def cap_status(out, src=None):
             st = {}
-            for cap, k in zip(q["caps"], h["kg"]):
-                if out[k] is not None and out[k] == gold(k):
+            groups = (zip(q["caps"], ([k] for k in h["kg"])) if q["world"] == "dispatch"
+                      else [(q["caps"][0], h["kg"])])
+            for cap, kk in groups:
+                if all(out[k] is not None and out[k] == gold(k) for k in kk):
                     st[cap] = "correct"
                 elif alt and out.get("x:") is not None and out["x:"] == R[f"f:{cap}"]:
                     st[cap] = "correct"                  # one-op request answered as main(a, b) = op(a, b)
@@ -969,6 +993,12 @@ def run_belt(reqs, raws, planner, writer, injects=None, overrides=None, lat_u=No
                  p_iso_ok=allc(B[h["CF_UW"]]), w_ok=w_ok, w_bad=w_bad, broken=broken, root=root, cf=cf,
                  oracle_notes=notes)
         t["lat_ms"]["exec"] = lat_x
+        if GRADER_V2:
+            if q["world"] == "expr":
+                gv = [v for k in h["kg"] for v in (B[h["G"]][k] or [])]
+                t["const_gold"] = len(set(gv)) <= 1          # D3: any constant answer passes this request
+            else:
+                t["exact_set"] = end_pass and not set(h["disp"]) - set(q["caps"])   # D4: no extra op dispatched
     return T
 
 
@@ -1008,6 +1038,11 @@ def summarize(T):
             e["stage_broken"] += t["inject"]["stage"] in t["broken"]
             e["fn_match"] += bool(t["inject"]["fn"]) and t["inject"]["fn"] in t["w_bad"]
     s["inject"] = inj
+    if GRADER_V2:
+        s["grader"] = "v2"
+        s["n_const_gold"] = sum(bool(t.get("const_gold")) for t in T)
+        s["pass_nonconst"] = rate([t["end_pass"] for t in T if not t.get("const_gold")])
+        s["pass_exact_set_dispatch"] = rate([t["exact_set"] for t in T if "exact_set" in t])
     return s
 
 # ----------------------------------------------------------------------------------------------- subcommands

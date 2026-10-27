@@ -214,3 +214,14 @@ BUT:
 - On the clean sets, retraining HURTS A: s5 97.8 -> T 88.3 / O 88.8 / Ts 88.8 (G 95.5, G2 98.3).
 - B is flat: s5 85.6 -> 86.8-89.1.
 Read: it learned v2pool-style phrasing and lost A generalisation. Not a gain on clean data.
+
+### 13:13 update — #54B, #53, #24
+- #54B relief-guided repair: DONE-NEGATIVE for "relief finds where to repair". d32_ter R=8: relief .649 vs random .646 vs none .631; oracle .668. The writer is the bottleneck (even the true bad line fixes only +3.7). Adaptation goes to I4 (writer-side repair).
+- #53 water (adapted): pure water still < relief; relief + gap-pond water (junction between lines) +1.7 pp [+0.7, +2.6], replicated on unseen seeds. His "água nas junções" idea is the part that carries signal. CPU; GPU confirm queued (40_relief53).
+- #24: review fixes applied; held-out leak quantified and removed from the primary verdict. Re-review pending before GPU.
+
+### #58 (10-27) — ECOSYSTEM FIRST: everything trains together
+His words: "pq não estava treinando tudo? pq a ideia e que seja tudo treinando, não faz sentido vc treinar separado, o ecosistema precisa é fazer tudo junto, aprendo junto, erra e afins. e preciso que de prioridade a ideia de ecosistema"
+Status: OPEN, TOP PRIORITY. Honest answer: until now each module (understander, planner, writer) was trained ALONE on generator gold inputs, to a fixed step budget, never on the real outputs of the module before it, and never updated together in one loop. I7 (65) still trained one blamed module at a time; held and folded into #58.
+Plan (eco58): one live loop with all modules: run the whole belt on requests -> bwrap + flags -> judges (flag rule, Qwen, Sonnet) blame + locate + fix -> every module updates in the SAME round (blamed module on fixes; all modules on their own successful episodes; downstream modules trained on upstream's REAL outputs), with replay + guard. Verdict: ECO vs SEP (same rows, modules trained separately) vs N vs base, end-to-end held-out pass, 3 seeds, equal steps.
+- 14:50 #12 (his row x column address): addr2d test_a .945/.9625 (2 seeds) vs control .56/.785; my prediction was .02-.35. Generalization to unseen compositions still weak (test_b .08 vs rank-tag .39). Seed 2 queued.

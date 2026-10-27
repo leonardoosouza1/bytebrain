@@ -420,3 +420,18 @@ Corpus index alone as generator (contexts capped at 8/16/32/48 bytes): parse 3.1
     runners. Old pass rates there are lower bounds.
   - Running: mix5 (#3 confirmatory, GPU, 12 seeds), then #12 address arms (~12 h). gradconst v3.3 (#26) caps tune on
     CPU; main runs (n 200, both stall modes) follow a review of `synth/gradconst33_verdict.py`.
+- **10-26 (night 2): #26 v3.3 verdict, #7 registered and queued.**
+  - #26 gradconst v3.3 (`synth/gradconst33_verdict.py`, CPU, n 200 per length, caps tuned on 40 dev problems, both
+    stall modes): VERDICT PASS. On constants, following the derivative beats derivative-free ES at len3 in both
+    modes: +8.5 pp CI [.03, .14] with the stall rule, +10.5 pp CI [.045, .165] without it, with 3-20x fewer
+    executions on the problems both solve. len1: ES slightly better (−2 pp). R3 missed by one problem (+10.5 > +10).
+    Still PARTIAL: the program structure comes from an oracle guess with noise; a learned guesser is the missing piece.
+  - #7 (+#2) self-training of the understander, `synth/selftrain.py` (REGISTRATION in its header, ledger #7):
+    pool of 600 Sonnet rewrites of s5's own training pairs, disjoint from every eval set; the student labels them
+    itself; arms G (own greedy), T (Sonnet relabels the flagged items from the student's candidates), O (gold), G2
+    (G, seed 2). Prediction arithmetic on #46's candidates: a vote over the student's own samples fixes 4 of 144
+    wrong labels (V arm cut); the flag points at 98 of the 144. Queue `q7.sh`: mix5 verdict → #7 (~4.5 h GPU) → #12.
+  - #7 amendment 22:23 (Opus pre-run review, before any label or training): G2 used other data, not only another
+    seed (`--data-seed` added, every arm on data seed 1); T falls back to G, not V; new arm Ts (teacher labels on
+    G's texts) separates relabelling from coverage; Sonnet prompt listed wrong expr ops (fixed); teacher gate
+    >= 90% valid. Queue is now `q7b.sh` (same order); #7 starts after a second Opus review of the fixes.

@@ -129,6 +129,9 @@ def main():
     ap.add_argument("--exclude", nargs="*", default=None,
                     help="more request files whose texts/golds may not be trained on (default: <out>/para/requests.json)")
     ap.add_argument("--steps", type=int, default=0, help="fixed optimizer steps (like-for-like with another arm)")
+    ap.add_argument("--data-seed", type=int, default=None,
+                    help="seed of train_pairs (phrasing + s5 extra trees); default = --seed. A seed-noise arm keeps the "
+                         "data of seed 1 with --data-seed 1 (ledger #7 review)")
     ap.add_argument("--tag-suffix", default="p", help="arm name suffix when --extra is used (s5p, s5v2, ...)")
     ap.add_argument("--spec-format", choices=["expr", "steps"], default="expr",
                     help="formula target: one nested expr string, or addressed steps s1 = op(x, y) (ledger #43 A1)")
@@ -178,7 +181,8 @@ def main():
         json.dump(res, open(os.path.join(odir, "result.json"), "w"), indent=1, ensure_ascii=False)
         print(json.dumps(res, ensure_ascii=False), flush=True)
         return
-    pairs, dropped = train_pairs(a.arm, a.seed, tests)
+    data_seed = a.seed if a.data_seed is None else a.data_seed
+    pairs, dropped = train_pairs(a.arm, data_seed, tests)
     n_extra, extra_dropped = 0, 0
     if a.extra:              # never a test request (sets A and B): same text or same gold (bar `one`); no held-out frame
         excl = a.exclude if a.exclude is not None else [p for p in [os.path.join(a.out, "para", "requests.json")]
@@ -238,7 +242,8 @@ def main():
     model.eval()
     ev = evaluate(model, tok, im_end, tests[:6] + tests[-6:] if a.smoke else tests, dev, MAX_NEW[a.spec_format])
     raws = ev.pop("raws")
-    res = {"tag": tag, "arm": a.arm, "seed": a.seed, "train_pairs": len(enc), "dropped_equal_to_test": dropped,
+    res = {"tag": tag, "arm": a.arm, "seed": a.seed, "data_seed": data_seed, "train_pairs": len(enc),
+           "dropped_equal_to_test": dropped,
            "extra": n_extra, "extra_dropped": extra_dropped, "extra_file": a.extra, "extra_reps": a.extra_reps,
            "spec_format": a.spec_format, "steps": steps, "train_s": train_s, "lora_params": n_lora, "loss_log": log,
            **ev}

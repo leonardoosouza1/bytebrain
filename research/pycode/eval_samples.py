@@ -66,7 +66,7 @@ def cut_function(text):
 
 
 def run_bwrap(src, fname, nargs):
-    cmd = ["bwrap", "--unshare-all", "--die-with-parent", "--new-session",
+    cmd = ["bwrap", "--unshare-all", "--die-with-parent", "--new-session", "--clearenv",  # review #48: no host env in the sandbox
            "--ro-bind", "/usr", "/usr", "--symlink", "usr/lib", "/lib", "--symlink", "usr/lib64", "/lib64",
            "--symlink", "usr/bin", "/bin", "--proc", "/proc", "--dev", "/dev",
            "/usr/bin/python3", "-I", "-S", "-c", RUNNER]

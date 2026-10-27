@@ -25,6 +25,7 @@ pool through `texts_of`, which drops every field but id and text):
                 the group the most frequent raw (ties: greedy, then the earliest)  [gold-free, self only; computed and
                 reported, not trained: see REGISTRATION]
              T  flagged -> Sonnet's spec (invalid answer -> V); not flagged -> V             [gold-free, + teacher]
+                [superseded by AMENDMENT F2/F3: fallback is G, not V; arm Ts = T labels on kept_self]
              O  generator gold                                                               [ceiling]
            flag = greedy invalid OR greedy outside the vote group OR vote group < 5 of k+1.
            G trains on the texts the student can label itself (kept_self); T and O on every kept text (kept_all): the
@@ -45,6 +46,7 @@ on #46's recorded s5 candidates, selftrain7/v2pool_arith.json, no model trained)
   --tag-suffix sfX; the baseline s5 = the same trainer, seed 1, 523 steps, no extra):
     G   seed 1, extra_G (kept_self)     G2  seed 2, extra_G (training-seed noise floor)
     T   seed 1, extra_T (kept_all)      O   seed 1, extra_O (kept_all, gold: ceiling)
+    [AMENDMENT F1/F3: every arm --data-seed 1; arm Ts seed 1, extra_Ts (kept_self)]
   Metric: belt end_pass (e2e_pipeline run --understander file, grader v1) per request, paired by request id; 95% CI =
   percentile bootstrap, 10_000 resamples, numpy default_rng(0), the same indices for every difference of a set.
   Primary set v2pool (593). B (para, 174) and A (e2e requests, 179) reported, not judged.
@@ -57,6 +59,25 @@ on #46's recorded s5 candidates, selftrain7/v2pool_arith.json, no model trained)
   s5's 16755; each belt summary's raws_file is that arm's raws.json; the s5 belt rerun on v2pool gives 441 (gate 5).
   Predictions (gate 7): O - s5 on v2pool +4 pp (range +1..+8), on B +3.5 (0..+7); G - s5 within +-3 pp; T recovers
   .6-.9 of O - G; A may drop in every arm (s5p's cue 'main' => formula cost A -8.4).
+
+AMENDMENT (10-26 ~22:22, Opus pre-run review; still before any pool label, training or eval exists):
+  F1 G2 was not seed noise: train_pairs is seeded by --seed (phrasing + the 3000 s5 extra trees), so seed 2 also
+     changed the data. student_understander gets --data-seed; EVERY trained arm runs --data-seed 1 (asserted).
+  F2 T on unflagged items = G (was V), and a flagged item whose Sonnet answer is invalid -> G: T differs from G only
+     where the teacher spoke (V vs G moved commutative swaps). extras reports unflagged_V_ne_G.
+  F3 new arm Ts = T labels on kept_self (G's texts). Ts - G = relabelling alone (mechanism); T - Ts = coverage of the
+     texts with no valid student candidate. The registered verdict stays on T - G; the same rule is applied to Ts - G
+     and reported as the mechanism verdict. Prediction: Ts - G <= +1 pp (likely NOT ESTABLISHED); most of T - G is
+     coverage (~68% of T's fixable labels are no-candidate texts).
+  F4 TEACH named sqrt/neg/... as one-argument expr ops; parse_expr accepts in expr only add sub mul div mod maxx avg
+     pct hyp with two arguments over a and b. Prompt fixed. Sonnet call timeout 600 -> 280 s, TimeoutExpired retried.
+  F5 queue gate: the teacher must return a valid spec for >= 90% of flagged items, else #7 stops before training.
+  F6 kept_self = kept texts with a G label (was: G and V); V can only be missing where G has no execution signature.
+     Claude 'result' null / non-dict output is retried like a timeout (second Opus review, 22:28, GO, nits only).
+  Verdict order stays: gate 1 -> PASS -> KILL -> NOT ESTABLISHED. Power ~50% for a T - G of ~2.7 pp.
+  Interpretation limit: Sonnet wrote pool F from the gold spec, so as teacher it relabels text it authored (an
+  authorship advantage a real teacher on user text would not have); v2pool's 'main' cue (100% expr / 0% dispatch) is
+  the same as the pool's, so v2pool cannot show the cue harm; B and A (18 dispatch texts with 'main' each) can.
 
 usage:
   selftrain.py labels  --pool POOL.json --out DIR [--k 8] [--limit N] [--check-raws RAWS.json]
@@ -169,7 +190,9 @@ that offers those operations; {"main": "expr", "expr": "<nested call>"} = main(a
 nested calls of op ids over a and b, e.g. "add(mul(a, b), b)". Operation ids: add a+b, sub a-b, mul a*b, div a/b,
 mod remainder of a/b, maxx larger of a and b, sqrt square root of a, neg -a, abs |a|, square a*a, pow a**b,
 fact a!, hyp hypotenuse with legs a and b, avg average of a and b, pct a percent of b. One-argument ops (sqrt, neg,
-abs, square, fact) take ONE argument in expr. Keep every operation, operand (a or b), operand order and nesting.
+abs, square, fact) and pow exist only in "dispatch". In "expr" only add, sub, mul, div, mod, maxx, avg, pct, hyp may
+appear, each with exactly two arguments; leaves are only a and b (no numbers). Keep every operation, operand (a or b),
+operand order and nesting.
 For each item, a smaller model proposed the candidate specs listed (possibly all wrong). If one of them is exactly
 right, answer it; otherwise write the right spec yourself.
 Answer with one JSON array only: [{"id": "...", "spec": {...}}], same ids, same count.
@@ -183,11 +206,12 @@ def sonnet(prompt, cwd, budget):
         if budget["left"] <= 0:
             return None
         budget["left"] -= 1
-        p = subprocess.run(["claude", "-p", "--model", "sonnet", "--tools", "", "--output-format", "json"],
-                           input=prompt, capture_output=True, text=True, timeout=600, cwd=cwd)
         try:
-            text = json.loads(p.stdout).get("result", "")
-        except json.JSONDecodeError:
+            p = subprocess.run(["claude", "-p", "--model", "sonnet", "--tools", "", "--output-format", "json"],
+                               input=prompt, capture_output=True, text=True, timeout=280, cwd=cwd)
+            text = (json.loads(p.stdout) or {}).get("result") or ""
+            assert isinstance(text, str)
+        except (subprocess.TimeoutExpired, json.JSONDecodeError, AttributeError, AssertionError):
             continue
         if "operation blocked by hook" in text[:300]:
             continue
@@ -235,16 +259,16 @@ def gold_spec(q):
 
 
 def cmd_extras(a):
-    """G (and V, not trained) on the texts the student can label itself; T and O on every text (the teacher also labels
-    the texts with no valid student candidate: that coverage is part of what T measures). T and O share texts."""
+    """G, Ts (and V, not trained) on the texts the student can label itself (kept_self); T and O on every kept text
+    (kept_all: the teacher also labels texts with no valid student candidate). T = Ts labels on more texts."""
     pool = json.load(open(a.pool))
     rows = {r["id"]: r for r in map(json.loads, open(os.path.join(a.out, "labels.jsonl")))}
     T = json.load(open(os.path.join(a.out, "teacher.json")))["teacher"]
     lab = {}
     for q in pool:
         r = rows[q["id"]]
-        t = T.get(q["id"]) if r["flag"] else None
-        lab[q["id"]] = {"G": r["G"], "V": r["V"], "T": t or r["V"], "O": gold_spec(q)}
+        t = T.get(q["id"]) if r["flag"] else None       # amendment 22:2x: unflagged (and invalid answer) -> G, not V
+        lab[q["id"]] = {"G": r["G"], "V": r["V"], "T": t or r["G"], "O": gold_spec(q)}
     # student_understander --extra filters, applied once to the union of arms (a text dropped in one arm is dropped in
     # all), so the trainer's own filter drops nothing (checked in verdict: extra_dropped == 0)
     tests = E.load_requests(E2E)
@@ -264,22 +288,28 @@ def cmd_extras(a):
             drop[why] += 1
         else:
             keep_all.append(q)
-    keep_self = [q for q in keep_all if lab[q["id"]]["G"] and lab[q["id"]]["V"]]
-    sets = {"G": keep_self, "V": keep_self, "T": keep_all, "O": keep_all}
+    keep_self = [q for q in keep_all if lab[q["id"]]["G"]]
+    sets = {"G": (keep_self, "G"), "V": ([q for q in keep_self if lab[q["id"]]["V"]], "V"), "Ts": (keep_self, "T"),
+            "T": (keep_all, "T"),
+            "O": (keep_all, "O")}                         # arm -> (texts, label key); V reported, not trained
     rep = {"pool": len(pool), "kept_all": len(keep_all), "kept_self": len(keep_self), "dropped": dict(drop),
-           "trained_arms": ["G", "T", "O"], "arms": {}}
+           "trained_arms": ["G", "Ts", "T", "O"], "arms": {},
+           "unflagged_V_ne_G": sum(not rows[q["id"]]["flag"] and lab[q["id"]]["V"] != lab[q["id"]]["G"]
+                                   for q in keep_self)}
     sig = signatures([lab[q["id"]][x] for q in keep_all for x in "GVTO" if lab[q["id"]][x]])
 
     def right(q, x):
         return sig.get(lab[q["id"]][x]) is not None and sig.get(lab[q["id"]][x]) == sig.get(lab[q["id"]]["O"])
-    for x, ks in sets.items():
+    for name, (ks, x) in sets.items():
+        assert all(lab[q["id"]][x] for q in ks), name
         json.dump([{"id": q["id"], "text": q["text"], "gold": json.loads(lab[q["id"]][x])} for q in ks],
-                  open(os.path.join(a.out, f"extra_{x}.json"), "w"), ensure_ascii=False, indent=0)
+                  open(os.path.join(a.out, f"extra_{name}.json"), "w"), ensure_ascii=False, indent=0)
         fl = [q for q in ks if rows[q["id"]]["flag"]]
-        rep["arms"][x] = {"n": len(ks), "exact_vs_gold": round(sum(lab[q["id"]][x] == lab[q["id"]]["O"] for q in ks) / len(ks), 4),
-                          "same_outputs_as_gold": round(sum(right(q, x) for q in ks) / len(ks), 4),
-                          "flagged_right": f"{sum(right(q, x) for q in fl)}/{len(fl)}",
-                          "unflagged_right": f"{sum(right(q, x) for q in ks if q not in fl)}/{len(ks) - len(fl)}"}
+        rep["arms"][name] = {"n": len(ks),
+                             "exact_vs_gold": round(sum(lab[q["id"]][x] == lab[q["id"]]["O"] for q in ks) / len(ks), 4),
+                             "same_outputs_as_gold": round(sum(right(q, x) for q in ks) / len(ks), 4),
+                             "flagged_right": f"{sum(right(q, x) for q in fl)}/{len(fl)}",
+                             "unflagged_right": f"{sum(right(q, x) for q in ks if q not in fl)}/{len(ks) - len(fl)}"}
     rep["no_self_label_in_kept_all"] = len(keep_all) - len(keep_self)
     rep["flag_catches_G_wrong"] = (f"{sum(rows[q['id']]['flag'] and not right(q, 'G') for q in keep_self)}/"
                                    f"{sum(not right(q, 'G') for q in keep_self)}")
@@ -326,8 +356,10 @@ def cmd_v2pool_arith(a):
 
 
 ARMS = {"s5": ("student_s5_s1", "student_s5_rerun7"), "G": ("student_s5sfG_s1", "student_s5sfG_s1"),
-        "G2": ("student_s5sfG_s2", "student_s5sfG_s2"), "T": ("student_s5sfT_s1", "student_s5sfT_s1"),
+        "G2": ("student_s5sfG_s2", "student_s5sfG_s2"), "Ts": ("student_s5sfTs_s1", "student_s5sfTs_s1"),
+        "T": ("student_s5sfT_s1", "student_s5sfT_s1"),
         "O": ("student_s5sfO_s1", "student_s5sfO_s1")}               # arm -> (student dir, belt tag)
+EXTRA_OF = {"G": "G", "G2": "G", "Ts": "Ts", "T": "T", "O": "O"}     # arm -> label set it trains on
 SETS = {"v2pool": f"{E2E}/v2pool", "B": f"{E2E}/para", "A": E2E}
 
 
@@ -338,11 +370,13 @@ def cmd_verdict(a):
         r = json.load(open(f"{E2E}/{d}/result.json"))
         if x != "s5":
             assert r["steps"] == 523 and r["extra_dropped"] == 0 and r["extra_reps"] == 3, (x, r["steps"], r["extra_dropped"])
+            assert r.get("data_seed") == 1, (x, r.get("data_seed"))          # amendment: G2 = seed noise, same data
             ef = r["extra_file"][0] if isinstance(r["extra_file"], list) else r["extra_file"]
-            assert os.path.normpath(ef) == os.path.normpath(os.path.join(a.out, f"extra_{x[0]}.json")), (x, ef)
-        res["checks"][x] = {k: r.get(k) for k in ("seed", "steps", "train_pairs", "extra", "extra_dropped", "train_s")}
+            assert os.path.normpath(ef) == os.path.normpath(os.path.join(a.out, f"extra_{EXTRA_OF[x]}.json")), (x, ef)
+        res["checks"][x] = {k: r.get(k) for k in ("seed", "data_seed", "steps", "train_pairs", "extra", "extra_dropped",
+                                                  "train_s")}
     base = res["checks"]["s5"]["train_pairs"]
-    for x in ("G", "T", "O"):
+    for x in EXTRA_OF:
         c = res["checks"][x]
         assert c["train_pairs"] - 3 * c["extra"] == base, (x, c, base)
     pas = {}
@@ -359,7 +393,8 @@ def cmd_verdict(a):
         idx = np.random.default_rng(0).integers(0, len(ids), (10_000, len(ids)))
         v = {x: np.array([pas[S, x][i] for i in ids]) for x in ARMS}
         out = {"n": len(ids), "pass": {x: round(float(v[x].mean()), 4) for x in ARMS}, "diff": {}}
-        for p, q in (("T", "G"), ("O", "G"), ("G2", "G"), ("G", "s5"), ("T", "s5"), ("O", "s5"), ("O", "T")):
+        for p, q in (("T", "G"), ("Ts", "G"), ("T", "Ts"), ("O", "G"), ("G2", "G"), ("G", "s5"), ("T", "s5"),
+                     ("O", "s5"), ("O", "T")):
             dd = v[p] - v[q]
             bs = dd[idx].mean(1)
             out["diff"][f"{p}-{q}"] = {"d": round(float(dd.mean()), 4),
@@ -368,20 +403,24 @@ def cmd_verdict(a):
         out["T_recovers_of_O_minus_G"] = round(out["diff"]["T-G"]["d"] / og, 3) if og else None
         res["sets"][S] = out
     V = res["sets"]["v2pool"]["diff"]
-    tg, og, noise = V["T-G"], V["O-G"], abs(V["G2-G"]["d"])
-    if og["ci"][0] <= 0:
-        verdict = "NO VERDICT (gate 1: O - G CI lower <= 0)"
-    elif tg["ci"][0] > 0 and tg["d"] > noise:
-        verdict = "PASS"
-    elif tg["ci"][1] < .02:
-        verdict = "KILL"
-    elif tg["ci"][0] > 0:
-        verdict = f"NOT ESTABLISHED (CI lower > 0 but T - G {tg['d']} <= seed noise |G2 - G| {noise})"
-    else:
-        verdict = "NOT ESTABLISHED"
+    og, noise = V["O-G"], abs(V["G2-G"]["d"])
+
+    def rule(d):                       # registered order: gate 1 -> PASS -> KILL -> NOT ESTABLISHED
+        if og["ci"][0] <= 0:
+            return "NO VERDICT (gate 1: O - G CI lower <= 0)"
+        if d["ci"][0] > 0 and d["d"] > noise:
+            return "PASS"
+        if d["ci"][1] < .02:
+            return "KILL"
+        if d["ci"][0] > 0:
+            return f"NOT ESTABLISHED (CI lower > 0 but {d['d']} <= seed noise |G2 - G| {noise})"
+        return "NOT ESTABLISHED"
+    verdict = rule(V["T-G"])
     res["verdict"] = verdict
+    res["verdict_mechanism_Ts_minus_G"] = rule(V["Ts-G"])     # amendment: relabelling alone, same texts as G
     json.dump(res, open(os.path.join(a.out, "verdict.json"), "w"), indent=1)
-    print(json.dumps({"verdict": verdict, "v2pool": res["sets"]["v2pool"]["diff"],
+    print(json.dumps({"verdict": verdict, "mechanism_Ts_minus_G": res["verdict_mechanism_Ts_minus_G"],
+                      "v2pool": res["sets"]["v2pool"]["diff"],
                       "pass": {S: res["sets"][S]["pass"] for S in SETS}}, indent=1), flush=True)
 
 

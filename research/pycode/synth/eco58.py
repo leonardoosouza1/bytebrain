@@ -758,8 +758,19 @@ class QwenJudge:
                                            add_generation_prompt=True, tokenize=False) for u in users]
         enc = self.tok(ps, return_tensors="pt", padding=True, add_special_tokens=False)
         ids, am = enc.input_ids.to(self.dev), enc.attention_mask.to(self.dev)
-        g = self.m.generate(input_ids=ids, attention_mask=am, max_new_tokens=max_new, do_sample=False,
-                            pad_token_id=self.tok.pad_token_id, temperature=None, top_p=None, top_k=None)
+        try:
+            g = self.m.generate(input_ids=ids, attention_mask=am, max_new_tokens=max_new, do_sample=False,
+                                pad_token_id=self.tok.pad_token_id, temperature=None, top_p=None, top_k=None)
+        except torch.OutOfMemoryError:
+            # SDPA math kernel on ROCm keeps [B, h, T, T]: long evidence prompts OOM at batch 8 (gpu_smoke 10-27).
+            # Split the batch in halves and retry; batch 1 OOM is a real failure and propagates.
+            if len(users) == 1:
+                raise
+            del ids, am, enc
+            torch.cuda.empty_cache()
+            h = len(users) // 2
+            print(json.dumps({"qwen_oom_split": len(users)}), flush=True)
+            return self.ask(system, users[:h], max_new) + self.ask(system, users[h:], max_new)
         return [self.tok.decode(r[ids.shape[1]:], skip_special_tokens=True) for r in g]
 
 # ------------------------------------------------------------------ training (every module, guarded)

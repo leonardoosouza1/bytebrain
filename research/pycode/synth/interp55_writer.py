@@ -357,7 +357,7 @@ def gen_writer(writer, jobs, temp_of, dev, bs, seed, max_new):
                 else:
                     cur.append(x)
             body = "\n".join(lines) + "\n" if lines else "return None\n"
-            out.setdefault(key, []).append(body)
+            out.setdefault(key, []).append(EV.clean_body(body))   # same cleaning as flat/Qwen (review 10-27)
     return out
 
 
